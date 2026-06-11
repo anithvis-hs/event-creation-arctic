@@ -447,7 +447,6 @@
       nodeEl.style.left = `${node.x}px`;
       nodeEl.style.top = `${node.y}px`;
     }
-    const groupEl = DOM.canvas.querySelector('.event-canvas-session-group');
     if (node.type === NODE_TYPES.SESSION || node.parentSessionId) renderCanvas();
     drawCanvasEdges();
   }
@@ -455,6 +454,7 @@
   function finishNodeDrag() {
     if (!state.nodeDrag) return;
     state.nodeDrag = null;
+    refreshEdgePorts(state.draft);
     markDirty();
   }
 
@@ -487,6 +487,7 @@
       return;
     }
     addManualEdge(state.draft, fromId, targetNodeId, fromPort, toPort);
+    refreshEdgePorts(state.draft);
     markDirty();
     renderAll();
   }
@@ -699,7 +700,7 @@
 
     layoutAllNodes(draft);
     syncDefaultEdges(draft);
-    (draft.edges || []).forEach(function (edge) { backfillEdgePorts(draft, edge); });
+    refreshEdgePorts(draft);
   }
 
   function updateTemplateGalleryVisibility() {
@@ -799,8 +800,10 @@
     const toCenter = getNodeCenter(toNode);
     const dx = toCenter.x - fromCenter.x;
     const dy = toCenter.y - fromCenter.y;
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
 
-    if (Math.abs(dx) > Math.abs(dy)) {
+    if (absDx > absDy + 4) {
       if (dx >= 0) return { fromPort: 'right', toPort: 'left' };
       return { fromPort: 'left', toPort: 'right' };
     }
@@ -809,17 +812,29 @@
     return { fromPort: 'top', toPort: 'bottom' };
   }
 
-  function resolveEdgePorts(edge, fromNode, toNode) {
-    let fromPort = normalizePortSide(edge.fromPort);
-    let toPort = normalizePortSide(edge.toPort);
+  function resolveEdgePorts(fromNode, toNode) {
+    return getBestEdgePorts(fromNode, toNode);
+  }
 
-    if (!fromPort || !toPort) {
+  function refreshEdgePorts(draft, singleEdge) {
+    if (!draft || !draft.edges) return;
+
+    draft.edges.forEach(function (edge) {
+      if (singleEdge && edge !== singleEdge) return;
+
+      const fromNode = draft.nodes.find(function (node) { return node.id === edge.from; });
+      const toNode = draft.nodes.find(function (node) { return node.id === edge.to; });
+
+      if (!fromNode || !toNode) {
+        edge.fromPort = edge.fromPort || DEFAULT_FROM_PORT;
+        edge.toPort = edge.toPort || DEFAULT_TO_PORT;
+        return;
+      }
+
       const best = getBestEdgePorts(fromNode, toNode);
-      fromPort = fromPort || best.fromPort;
-      toPort = toPort || best.toPort;
-    }
-
-    return { fromPort: fromPort, toPort: toPort };
+      edge.fromPort = best.fromPort;
+      edge.toPort = best.toPort;
+    });
   }
 
   function buildEdgePath(x1, y1, fromPort, x2, y2, toPort) {
@@ -843,20 +858,7 @@
   }
 
   function backfillEdgePorts(draft, edge) {
-    if (edge.fromPort && edge.toPort) return;
-
-    const fromNode = draft.nodes.find(function (node) { return node.id === edge.from; });
-    const toNode = draft.nodes.find(function (node) { return node.id === edge.to; });
-
-    if (fromNode && toNode) {
-      const best = getBestEdgePorts(fromNode, toNode);
-      edge.fromPort = edge.fromPort || best.fromPort;
-      edge.toPort = edge.toPort || best.toPort;
-      return;
-    }
-
-    edge.fromPort = edge.fromPort || DEFAULT_FROM_PORT;
-    edge.toPort = edge.toPort || DEFAULT_TO_PORT;
+    refreshEdgePorts(draft, edge || null);
   }
 
   function addEdgeIfMissing(draft, from, to, manual, portOptions) {
@@ -864,7 +866,7 @@
     const existing = draft.edges.find(function (edge) { return edge.from === from && edge.to === to; });
 
     if (existing) {
-      backfillEdgePorts(draft, existing);
+      refreshEdgePorts(draft, existing);
       return;
     }
 
@@ -1416,7 +1418,7 @@
       const toNode = state.draft.nodes.find(function (node) { return node.id === edge.to; });
       if (!fromNode || !toNode) return;
 
-      const ports = resolveEdgePorts(edge, fromNode, toNode);
+      const ports = resolveEdgePorts(fromNode, toNode);
       const start = getNodePortPoint(fromNode, ports.fromPort);
       const end = getNodePortPoint(toNode, ports.toPort);
       const edgeClass = edge.manual ? 'event-canvas-edge-path is-manual' : 'event-canvas-edge-path';
