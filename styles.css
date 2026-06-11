@@ -1941,7 +1941,8 @@ a.switcher-nav-link {
 .event-admin-canvas {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
+  overscroll-behavior: contain;
   border: 1px dashed rgba(51, 78, 92, 0.22);
   border-radius: var(--radius-sm);
   background:
@@ -2108,14 +2109,23 @@ a.switcher-nav-link {
   transform: translateY(-50%);
 }
 
-.event-canvas-edge-path.is-manual {
-  stroke: rgba(42, 186, 248, 0.72);
+.event-canvas-port::after {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  border-radius: 999px;
 }
 
-.event-canvas-edge-path.is-preview {
-  stroke-dasharray: 4 4;
-  stroke: rgba(42, 186, 248, 0.65);
-  marker-end: none;
+.event-admin-canvas.is-space-pan {
+  cursor: grab;
+}
+
+.event-admin-canvas.is-space-pan:active {
+  cursor: grabbing;
+}
+
+.event-canvas-edge-path.is-manual {
+  stroke: rgba(42, 186, 248, 0.72);
 }
 
 .event-canvas-edges {
@@ -2130,6 +2140,21 @@ a.switcher-nav-link {
   fill: none;
   stroke: rgba(51, 78, 92, 0.42);
   stroke-width: 1.6;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.event-canvas-edge-path.is-selected {
+  stroke: rgba(42, 186, 248, 0.95);
+  stroke-width: 2.4;
+}
+
+.event-canvas-edge-path.is-preview {
+  stroke-dasharray: 4 4;
+  stroke: rgba(42, 186, 248, 0.65);
+  marker-end: none;
+  pointer-events: none;
+  cursor: default;
 }
 
 .event-canvas-node {
@@ -2155,6 +2180,28 @@ a.switcher-nav-link {
 .event-canvas-node-child {
   padding: var(--space-2xs) var(--space-sm);
   background: rgba(255, 255, 255, 0.88);
+}
+
+.event-canvas-node-has-error {
+  border-color: rgba(227, 137, 26, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(227, 137, 26, 0.18);
+}
+
+.event-canvas-node-error-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: rgba(227, 137, 26, 0.92);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  z-index: 4;
+  pointer-events: none;
 }
 
 .event-canvas-node:focus-visible {

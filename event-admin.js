@@ -9,6 +9,7 @@
   const PORT_SIDES = ['top', 'right', 'bottom', 'left'];
   const DEFAULT_FROM_PORT = 'bottom';
   const DEFAULT_TO_PORT = 'top';
+  const PORT_SNAP_RADIUS = 20;
   const STATUS = {
     NOT_STARTED: 'Not started',
     IN_PROGRESS: 'In progress',
@@ -79,7 +80,8 @@
     zoomInButton: document.getElementById('event-canvas-zoom-in'),
     zoomOutButton: document.getElementById('event-canvas-zoom-out'),
     zoomResetButton: document.getElementById('event-canvas-zoom-reset'),
-    zoomLabel: document.getElementById('event-canvas-zoom-label')
+    zoomLabel: document.getElementById('event-canvas-zoom-label'),
+    fitGraphButton: document.getElementById('event-canvas-fit-graph')
   };
 
   if (!DOM.palette || !DOM.canvas || !DOM.form) return;
@@ -94,7 +96,10 @@
     canvasView: { scale: 1, panX: 0, panY: 0 },
     nodeDrag: null,
     edgeDrag: null,
-    panDrag: null
+    panDrag: null,
+    selectedEdgeKey: null,
+    spacePanActive: false,
+    removedAutoEdges: {}
   };
 
   let toastTimeoutId = null;
@@ -477,19 +482,36 @@
     drawCanvasEdges();
   }
 
-  function finishEdgeDrag(targetNodeId, toPort) {
+  function finishEdgeDrag(targetNodeId, toPort, event) {
     if (!state.edgeDrag) return;
     const fromId = state.edgeDrag.fromNodeId;
     const fromPort = state.edgeDrag.fromPort;
     state.edgeDrag = null;
-    if (!targetNodeId || targetNodeId === fromId || !toPort) {
+
+    let targetId = targetNodeId;
+    let targetPortSide = toPort;
+
+    if ((!targetId || !targetPortSide) && event) {
+      const point = getCanvasPointFromEvent(event);
+      const snap = findSnapPortAtPoint(point.x, point.y, fromId);
+      if (snap) {
+        targetId = snap.nodeId;
+        targetPortSide = snap.portSide;
+      }
+    }
+
+    if (!targetId || targetId === fromId || !targetPortSide) {
       drawCanvasEdges();
+      showToast('Release on another node handle to connect.', 4000);
       return;
     }
-    addManualEdge(state.draft, fromId, targetNodeId, fromPort, toPort);
-    refreshEdgePorts(state.draft);
+
+    addManualEdge(state.draft, fromId, targetId, fromPort, targetPortSide);
+    state.selectedEdgeKey = `${fromId}->${targetId}`;
+    state.selectedNodeId = null;
     markDirty();
     renderAll();
+    showToast(`Connected ${getNodeLabelById(state.draft, fromId)} → ${getNodeLabelById(state.draft, targetId)}.`, 4000);
   }
 
   function startPanDrag(event) {
@@ -516,6 +538,9 @@
   function markDirty() {
     if (!state.draft) return;
     state.draft.meta.isDirty = true;
+    if (state.draft.meta) {
+      state.draft.meta.removedAutoEdges = state.removedAutoEdges;
+    }
     saveDraft(false);
     renderSummary();
   }
@@ -721,6 +746,30 @@
     updateCanvasZoomLabel();
   }
 
+  function getCanvasContainerPoint(clientX, clientY) {
+    const rect = DOM.canvas.getBoundingClientRect();
+    return {
+      x: clientX - rect.left,
+      y: clientY - rect.top
+    };
+  }
+
+  function panCanvasBy(deltaX, deltaY) {
+    state.canvasView.panX += deltaX;
+    state.canvasView.panY += deltaY;
+  }
+
+  function zoomCanvasAt(clientX, clientY, deltaScale) {
+    const point = getCanvasContainerPoint(clientX, clientY);
+    const oldScale = state.canvasView.scale;
+    const newScale = Math.max(0.5, Math.min(1.6, oldScale + deltaScale));
+    if (newScale === oldScale) return;
+    const ratio = newScale / oldScale;
+    state.canvasView.panX = point.x - (point.x - state.canvasView.panX) * ratio;
+    state.canvasView.panY = point.y - (point.y - state.canvasView.panY) * ratio;
+    state.canvasView.scale = newScale;
+  }
+
   function setCanvasZoom(nextScale) {
     state.canvasView.scale = Math.max(0.5, Math.min(1.6, nextScale));
     applyCanvasTransform();
@@ -731,6 +780,29 @@
     state.canvasView = { scale: 1, panX: 0, panY: 0 };
     applyCanvasTransform();
     drawCanvasEdges();
+  }
+
+  function fitCanvasToGraph() {
+    if (!state.draft || !state.draft.nodes.length) return;
+    layoutAllNodes(state.draft);
+    const padding = 32;
+    const graphWidth = state.draft.meta.graphWidth || 960;
+    const graphHeight = state.draft.meta.graphHeight || 720;
+    const viewWidth = Math.max(1, DOM.canvas.clientWidth);
+    const viewHeight = Math.max(1, DOM.canvas.clientHeight);
+    const scaleX = (viewWidth - (padding * 2)) / graphWidth;
+    const scaleY = (viewHeight - (padding * 2)) / graphHeight;
+    const scale = Math.max(0.5, Math.min(1.6, Math.min(scaleX, scaleY, 1)));
+    state.canvasView.scale = scale;
+    state.canvasView.panX = Math.max(padding, (viewWidth - (graphWidth * scale)) / 2);
+    state.canvasView.panY = padding;
+    applyCanvasTransform();
+    drawCanvasEdges();
+  }
+
+  function setSpacePanActive(isActive) {
+    state.spacePanActive = isActive;
+    DOM.canvas.classList.toggle('is-space-pan', isActive);
   }
 
   function getCanvasPointFromEvent(event) {
@@ -812,7 +884,13 @@
     return { fromPort: 'top', toPort: 'bottom' };
   }
 
-  function resolveEdgePorts(fromNode, toNode) {
+  function resolveEdgePorts(edge, fromNode, toNode) {
+    if (edge.manual && edge.fromPort && edge.toPort) {
+      return {
+        fromPort: normalizePortSide(edge.fromPort) || DEFAULT_FROM_PORT,
+        toPort: normalizePortSide(edge.toPort) || DEFAULT_TO_PORT
+      };
+    }
     return getBestEdgePorts(fromNode, toNode);
   }
 
@@ -821,6 +899,7 @@
 
     draft.edges.forEach(function (edge) {
       if (singleEdge && edge !== singleEdge) return;
+      if (edge.manual) return;
 
       const fromNode = draft.nodes.find(function (node) { return node.id === edge.from; });
       const toNode = draft.nodes.find(function (node) { return node.id === edge.to; });
@@ -835,6 +914,61 @@
       edge.fromPort = best.fromPort;
       edge.toPort = best.toPort;
     });
+  }
+
+  function getEdgeKey(edge) {
+    return `${edge.from}->${edge.to}`;
+  }
+
+  function findEdgeByKey(draft, edgeKey) {
+    return draft.edges.find(function (edge) { return getEdgeKey(edge) === edgeKey; }) || null;
+  }
+
+  function getNodeLabelById(draft, nodeId) {
+    const node = draft.nodes.find(function (item) { return item.id === nodeId; });
+    return node ? cleanText(node.label) : 'Node';
+  }
+
+  function findSnapPortAtPoint(x, y, excludeNodeId) {
+    if (!state.draft) return null;
+    let match = null;
+    let bestDistance = PORT_SNAP_RADIUS;
+
+    state.draft.nodes.forEach(function (node) {
+      if (node.id === excludeNodeId) return;
+      PORT_SIDES.forEach(function (side) {
+        const portPoint = getNodePortPoint(node, side);
+        const distance = Math.hypot(portPoint.x - x, portPoint.y - y);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          match = { nodeId: node.id, portSide: side };
+        }
+      });
+    });
+
+    return match;
+  }
+
+  function removeEdgeByKey(edgeKey) {
+    const edge = findEdgeByKey(state.draft, edgeKey);
+    if (!edge) return false;
+
+    if (!edge.manual) {
+      state.removedAutoEdges[edgeKey] = true;
+    }
+
+    state.draft.edges = state.draft.edges.filter(function (item) {
+      return getEdgeKey(item) !== edgeKey;
+    });
+    state.selectedEdgeKey = null;
+    markDirty();
+    renderAll();
+    showToast('Connection removed.', 4000);
+    return true;
+  }
+
+  function isAutoEdgeSuppressed(from, to) {
+    return Boolean(state.removedAutoEdges[`${from}->${to}`]);
   }
 
   function buildEdgePath(x1, y1, fromPort, x2, y2, toPort) {
@@ -866,7 +1000,7 @@
     const existing = draft.edges.find(function (edge) { return edge.from === from && edge.to === to; });
 
     if (existing) {
-      refreshEdgePorts(draft, existing);
+      if (!existing.manual) refreshEdgePorts(draft, existing);
       return;
     }
 
@@ -891,15 +1025,18 @@
   }
 
   function addManualEdge(draft, from, to, fromPort, toPort) {
+    const edgeKey = `${from}->${to}`;
     const existing = draft.edges.find(function (edge) { return edge.from === from && edge.to === to; });
 
     if (existing) {
       existing.manual = true;
       existing.fromPort = normalizePortSide(fromPort) || existing.fromPort || DEFAULT_FROM_PORT;
       existing.toPort = normalizePortSide(toPort) || existing.toPort || DEFAULT_TO_PORT;
+      delete state.removedAutoEdges[edgeKey];
       return;
     }
 
+    delete state.removedAutoEdges[edgeKey];
     draft.edges.push({
       from: from,
       to: to,
@@ -917,17 +1054,23 @@
     const banner = findSingletonNodeId(draft, NODE_TYPES.BANNER);
     const instructors = findSingletonNodeId(draft, NODE_TYPES.INSTRUCTORS);
     const sessions = findSingletonNodeId(draft, NODE_TYPES.SESSIONS);
-    if (basics && reg) addEdgeIfMissing(draft, basics, reg, false);
-    if (reg && banner) addEdgeIfMissing(draft, reg, banner, false);
-    if (banner && instructors) addEdgeIfMissing(draft, banner, instructors, false);
-    if (instructors && sessions) addEdgeIfMissing(draft, instructors, sessions, false);
+
+    function addAutoEdge(from, to) {
+      if (!from || !to || isAutoEdgeSuppressed(from, to)) return;
+      addEdgeIfMissing(draft, from, to, false);
+    }
+
+    addAutoEdge(basics, reg);
+    addAutoEdge(reg, banner);
+    addAutoEdge(banner, instructors);
+    addAutoEdge(instructors, sessions);
 
     if (sessions) {
       syncSessionIndex(draft);
       draft.sessions.forEach(function (sessionId) {
-        addEdgeIfMissing(draft, sessions, sessionId, false);
+        addAutoEdge(sessions, sessionId);
         getSessionChildNodes(draft, sessionId).forEach(function (child) {
-          addEdgeIfMissing(draft, sessionId, child.id, false);
+          addAutoEdge(sessionId, child.id);
         });
       });
     }
@@ -1336,6 +1479,12 @@
     }).join('');
   }
 
+  function nodeShowCanvasError(node) {
+    const validation = validateNode(node);
+    if (!validation.errors.length) return false;
+    return Boolean(state.attemptedNodeIds[node.id]) || Boolean(state.draft.meta.validationAttempted);
+  }
+
   function renderCanvasPorts(nodeId) {
     return PORT_SIDES.map(function (side) {
       return `<span class="event-canvas-port event-canvas-port-${side}" data-port-side="${side}" data-node-id="${nodeId}" aria-hidden="true"></span>`;
@@ -1356,8 +1505,10 @@
     const groupClass = node.type === NODE_TYPES.SESSION
       ? ' event-canvas-node-session'
       : (isChild ? ' event-canvas-node-child' : '');
+    const errorClass = nodeShowCanvasError(node) ? ' event-canvas-node-has-error' : '';
+    const errorBadge = nodeShowCanvasError(node) ? '<span class="event-canvas-node-error-badge" aria-label="Needs attention">!</span>' : '';
 
-    return `<div class="event-canvas-node${groupClass}${isActive ? ' is-active' : ''}" data-node-id="${node.id}" role="button" tabindex="0" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${width}px;min-height:${height}px">${renderCanvasPorts(node.id)}${removeButton}<span class="event-canvas-node-copy"><span class="event-canvas-node-head"><span class="event-canvas-node-title">${escapeHtml(nodeLabel)}</span><span class="event-status ${statusClass(status)}">${escapeHtml(status)}</span></span></span></div>`;
+    return `<div class="event-canvas-node${groupClass}${errorClass}${isActive ? ' is-active' : ''}" data-node-id="${node.id}" role="button" tabindex="0" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${width}px;min-height:${height}px">${renderCanvasPorts(node.id)}${removeButton}${errorBadge}<span class="event-canvas-node-copy"><span class="event-canvas-node-head"><span class="event-canvas-node-title">${escapeHtml(nodeLabel)}</span><span class="event-status ${statusClass(status)}">${escapeHtml(status)}</span></span></span></div>`;
   }
 
   function renderSessionGroupsMarkup() {
@@ -1418,12 +1569,14 @@
       const toNode = state.draft.nodes.find(function (node) { return node.id === edge.to; });
       if (!fromNode || !toNode) return;
 
-      const ports = resolveEdgePorts(fromNode, toNode);
+      const ports = resolveEdgePorts(edge, fromNode, toNode);
       const start = getNodePortPoint(fromNode, ports.fromPort);
       const end = getNodePortPoint(toNode, ports.toPort);
-      const edgeClass = edge.manual ? 'event-canvas-edge-path is-manual' : 'event-canvas-edge-path';
+      const edgeKey = getEdgeKey(edge);
+      const isSelected = state.selectedEdgeKey === edgeKey;
+      const edgeClass = `${edge.manual ? 'event-canvas-edge-path is-manual' : 'event-canvas-edge-path'}${isSelected ? ' is-selected' : ''}`;
       const d = buildEdgePath(start.x, start.y, ports.fromPort, end.x, end.y, ports.toPort);
-      paths += `<path class="${edgeClass}" d="${d}" marker-end="url(#event-canvas-arrow)"></path>`;
+      paths += `<path class="${edgeClass}" data-edge-from="${edge.from}" data-edge-to="${edge.to}" d="${d}" marker-end="url(#event-canvas-arrow)"></path>`;
     });
 
     if (state.edgeDrag) {
@@ -1459,7 +1612,9 @@
 
     const template = state.draft.meta.templateId ? getTemplateById(state.draft.meta.templateId) : null;
     const templateLabel = template ? `${template.label} template` : 'Blank canvas';
-    DOM.meta.textContent = `${templateLabel} · Draft ${state.draft.meta.isDirty ? 'modified' : 'saved'} at ${savedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`;
+    const syncedAt = savedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const validationLabel = state.draft.meta.isDirty ? 'Not validated yet' : 'Validated and publish-ready';
+    DOM.meta.textContent = `${templateLabel} · Synced locally at ${syncedAt} · ${validationLabel}.`;
   }
 
   function showTemplateGallery() {
@@ -1501,7 +1656,7 @@
       return false;
     }
 
-    if (!opts.skipConfirm && !confirmReplaceDraft('You have unsaved changes. Load this template anyway?')) {
+    if (!opts.skipConfirm && !confirmReplaceDraft('You have unvalidated changes. Load this template anyway?')) {
       return false;
     }
 
@@ -1514,7 +1669,7 @@
   }
 
   function startBlankFromGallery() {
-    if (!confirmReplaceDraft('You have unsaved changes. Start a blank canvas anyway?')) return;
+    if (!confirmReplaceDraft('You have unvalidated changes. Start a blank canvas anyway?')) return;
     const draft = createDraft();
     draft.meta.templateChosen = true;
     loadDraft(draft);
@@ -1541,7 +1696,7 @@
 
     if (!normalizedTitle) return false;
 
-    if (!opts.skipConfirm && !confirmReplaceDraft('You have unsaved changes. Start this event from scratch anyway?')) {
+    if (!opts.skipConfirm && !confirmReplaceDraft('You have unvalidated changes. Start this event from scratch anyway?')) {
       return false;
     }
 
@@ -1969,7 +2124,7 @@
     if (!summaryHost) return;
 
     summaryHost.innerHTML = `
-      <h2>Event draft saved</h2>
+      <h2>Event draft validated</h2>
       <p class="event-helper">${escapeHtml(basicsPayload.title || 'Untitled event')} · ${state.draft.sessions.length} session branch(es) · Required nodes complete.</p>
       <ul>
         <li>Template: ${escapeHtml(state.draft.meta.templateId || 'Blank canvas')}</li>
@@ -1992,6 +2147,7 @@
 
   function validateAndSave() {
     if (!state.isInitialized || !state.draft) return;
+    state.draft.meta.validationAttempted = true;
     const requiredNodes = state.draft.nodes.filter(function (node) {
       return node.required && !isSessionChildType(node.type);
     });
@@ -2036,8 +2192,8 @@
 
     const warningCount = checklist.warnings.length;
     const toastMessage = warningCount
-      ? `Draft saved with ${warningCount} warning${warningCount > 1 ? 's' : ''}.`
-      : 'Draft saved. Event is publish-ready.';
+      ? `Draft validated with ${warningCount} warning${warningCount > 1 ? 's' : ''}.`
+      : 'Draft validated. Event is publish-ready.';
     showToast(toastMessage, 5000);
     showPostSaveSummary();
   }
@@ -2050,6 +2206,8 @@
       node.type = cleanText(node.type);
     });
     state.draft = draft;
+    state.removedAutoEdges = draft.meta.removedAutoEdges || {};
+    state.selectedEdgeKey = null;
     state.selectedNodeId = (function () {
       const preferred = draft.nodes.find(function (node) { return !isSessionChildType(node.type); });
       if (preferred) return preferred.id;
@@ -2065,7 +2223,7 @@
 
   function startNewDraft() {
     if (state.draft && state.draft.meta.isDirty) {
-      const shouldReplace = window.confirm('You have unsaved changes. Start a new draft anyway?');
+      const shouldReplace = window.confirm('You have unvalidated changes. Start a new draft anyway?');
       if (!shouldReplace) return;
     }
     loadDraft(createDraft());
@@ -2081,6 +2239,7 @@
     const shouldReset = window.confirm('Reset current draft to a blank event? This cannot be undone.');
     if (!shouldReset) return;
     loadDraft(createDraft());
+    state.removedAutoEdges = {};
     saveDraft(false);
     showTemplateGallery();
     resetCanvasView();
@@ -2178,6 +2337,12 @@
       return;
     }
 
+    if (state.spacePanActive && event.button === 0) {
+      event.preventDefault();
+      startPanDrag(event);
+      return;
+    }
+
     const node = event.target.closest('.event-canvas-node[data-node-id]');
     if (node && !event.target.closest('.event-canvas-node-remove') && !event.target.closest('.event-canvas-port')) {
       startNodeDrag(node.dataset.nodeId, event);
@@ -2189,40 +2354,74 @@
     }
   });
 
-  DOM.canvas.addEventListener('mousemove', function (event) {
-    if (state.nodeDrag) moveNodeDrag(event);
-    if (state.edgeDrag) moveEdgeDrag(event);
-    if (state.panDrag) movePanDrag(event);
-  });
-
-  DOM.canvas.addEventListener('mouseup', function (event) {
+  function handleCanvasMouseUp(event) {
     if (state.nodeDrag) finishNodeDrag();
     if (state.panDrag) finishPanDrag();
     if (state.edgeDrag) {
       const targetPort = event.target.closest('.event-canvas-port');
       finishEdgeDrag(
         targetPort ? targetPort.dataset.nodeId : null,
-        targetPort ? targetPort.dataset.portSide : null
+        targetPort ? targetPort.dataset.portSide : null,
+        event
       );
     }
+  }
+
+  DOM.canvas.addEventListener('mouseup', handleCanvasMouseUp);
+  document.addEventListener('mouseup', function (event) {
+    if (!state.edgeDrag) return;
+    if (DOM.canvas.contains(event.target)) return;
+    handleCanvasMouseUp(event);
+  });
+
+  DOM.canvas.addEventListener('mousemove', function (event) {
+    if (state.nodeDrag) moveNodeDrag(event);
+    if (state.edgeDrag) moveEdgeDrag(event);
+    if (state.panDrag) movePanDrag(event);
   });
 
   DOM.canvas.addEventListener('wheel', function (event) {
-    if (!state.draft || !state.draft.nodes.length) return;
+    if (!state.draft) return;
     event.preventDefault();
-    const delta = event.deltaY > 0 ? -0.08 : 0.08;
-    setCanvasZoom(state.canvasView.scale + delta);
+
+    const zoomIntent = event.ctrlKey || event.metaKey;
+    const isTrackpadScroll = event.deltaMode === 0 && !zoomIntent;
+
+    if (isTrackpadScroll) {
+      panCanvasBy(-event.deltaX, -event.deltaY);
+    } else {
+      const delta = event.deltaY > 0 ? -0.08 : 0.08;
+      zoomCanvasAt(event.clientX, event.clientY, delta);
+    }
+
+    applyCanvasTransform();
+    drawCanvasEdges();
   }, { passive: false });
 
   DOM.canvas.addEventListener('click', function (event) {
+    const edgePath = event.target.closest('.event-canvas-edge-path');
+    if (edgePath && !edgePath.classList.contains('is-preview')) {
+      state.selectedEdgeKey = `${edgePath.getAttribute('data-edge-from')}->${edgePath.getAttribute('data-edge-to')}`;
+      state.selectedNodeId = null;
+      clearAlert();
+      renderAll();
+      return;
+    }
+
     const action = event.target.closest('[data-action]');
     if (action && action.dataset.action === 'remove-node') {
       removeNode(action.dataset.nodeId);
       return;
     }
+
     const node = event.target.closest('.event-canvas-node[data-node-id]');
-    if (!node) return;
+    if (!node) {
+      state.selectedEdgeKey = null;
+      return;
+    }
+
     state.selectedNodeId = node.dataset.nodeId;
+    state.selectedEdgeKey = null;
     clearAlert();
     renderAll();
   });
@@ -2282,10 +2481,28 @@
   });
 
   document.addEventListener('keydown', function (event) {
-    if (event.key === 'Delete' && state.isInitialized && state.selectedNodeId) {
-      const selected = getNodeById(state.selectedNodeId);
-      if (selected && !isSessionChildType(selected.type)) removeNode(state.selectedNodeId);
+    if (event.code === 'Space' && !event.repeat) {
+      const tag = event.target && event.target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || event.target.isContentEditable) return;
+      event.preventDefault();
+      setSpacePanActive(true);
+      return;
     }
+
+    if (event.key === 'Delete' && state.isInitialized) {
+      if (state.selectedEdgeKey) {
+        removeEdgeByKey(state.selectedEdgeKey);
+        return;
+      }
+      if (state.selectedNodeId) {
+        const selected = getNodeById(state.selectedNodeId);
+        if (selected && !isSessionChildType(selected.type)) removeNode(state.selectedNodeId);
+      }
+    }
+  });
+
+  document.addEventListener('keyup', function (event) {
+    if (event.code === 'Space') setSpacePanActive(false);
   });
 
   DOM.zoomInButton && DOM.zoomInButton.addEventListener('click', function () {
@@ -2295,12 +2512,7 @@
     setCanvasZoom(state.canvasView.scale - 0.1);
   });
   DOM.zoomResetButton && DOM.zoomResetButton.addEventListener('click', resetCanvasView);
-
-  window.addEventListener('beforeunload', function (event) {
-    if (!state.isInitialized || !state.draft || !state.draft.meta.isDirty) return;
-    event.preventDefault();
-    event.returnValue = '';
-  });
+  DOM.fitGraphButton && DOM.fitGraphButton.addEventListener('click', fitCanvasToGraph);
 
   window.addEventListener('resize', function () {
     if (!state.isInitialized) return;
