@@ -1637,8 +1637,8 @@ a.switcher-nav-link {
 .content-pane-header-workspace {
   justify-content: space-between;
   gap: var(--space-lg);
-  padding: var(--space-xl);
-  padding-bottom: var(--space-lg);
+  padding: var(--space-md) var(--space-lg);
+  padding-bottom: var(--space-sm);
 }
 
 .workspace-header-copy {
@@ -1772,7 +1772,7 @@ a.switcher-nav-link {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(250px, 280px) minmax(0, 1fr) minmax(320px, 370px);
+  grid-template-columns: minmax(200px, 220px) minmax(0, 1fr) minmax(260px, 300px);
 }
 
 .event-admin-palette-panel,
@@ -1793,6 +1793,7 @@ a.switcher-nav-link {
 .event-admin-canvas-panel {
   position: relative;
   border-right: 1px solid rgba(51, 78, 92, 0.12);
+  padding: var(--space-sm);
 }
 
 .event-admin-toast-host {
@@ -1940,7 +1941,7 @@ a.switcher-nav-link {
 
 .event-admin-canvas {
   flex: 1;
-  min-height: 0;
+  min-height: min(360px, 45vh);
   overflow: hidden;
   overscroll-behavior: contain;
   border: 1px dashed rgba(51, 78, 92, 0.22);
@@ -1966,8 +1967,11 @@ a.switcher-nav-link {
 
 .event-admin-canvas-meta {
   color: #99a6ad;
-  font-size: 11px;
+  font-size: 10px;
   line-height: var(--line-height-tight);
+  margin-left: auto;
+  max-width: 100%;
+  text-align: right;
 }
 
 .event-template-gallery.is-hidden {
@@ -1981,6 +1985,8 @@ a.switcher-nav-link {
   border: 1px solid rgba(51, 78, 92, 0.12);
   border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.48);
+  max-height: min(200px, 28vh);
+  overflow-y: auto;
 }
 
 .event-template-gallery-header {
@@ -2068,10 +2074,12 @@ a.switcher-nav-link {
 }
 
 .event-canvas-toolbar {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: var(--space-2xs);
   flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
 }
 
 .event-canvas-port {
