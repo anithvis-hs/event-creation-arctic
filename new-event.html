@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Arctic AI - New Event</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="event-editor-shell.js" defer></script>
+  <script src="event-admin.js" defer></script>
+</head>
+<body class="event-page">
+  <div class="app-container">
+    <div class="background">
+      <div class="background-inner">
+        <div class="background-gradient"></div>
+      </div>
+    </div>
+
+    <main class="workspace-panel" aria-label="New Event workspace">
+      <header class="content-pane-header content-pane-header-workspace">
+        <div class="workspace-header-copy">
+          <h1>New Event</h1>
+        </div>
+        <div class="workspace-header-actions">
+          <a class="home-task-action workspace-link-action" href="index.html#events-workspace">Back to Home</a>
+          <button type="button" class="home-task-action" id="event-admin-close-button">Reset</button>
+          <button type="button" class="home-task-action" id="workspace-save-button">Save</button>
+        </div>
+      </header>
+      <div class="content-pane-divider"></div>
+      <section class="workspace-event-editor" aria-label="Node-based event setup">
+        <div id="event-editor-root"></div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

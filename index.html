@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Arctic AI – Starter Kit</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="panel-resize.js" defer></script>
+  <script src="event-editor-shell.js" defer></script>
+  <script src="event-admin.js" defer></script>
+  <script src="chat.js" defer></script>
+</head>
+<body>
+  <div class="app-container">
+    <!-- Background -->
+    <div class="background">
+      <div class="background-inner">
+        <div class="background-gradient"></div>
+      </div>
+    </div>
+
+    <!-- Workspace Panel -->
+    <main class="workspace-panel" id="workspace-panel" aria-label="Workspace">
+      <div class="workspace-default-view" id="workspace-default-view">
+        <header class="content-pane-header content-pane-header-workspace">
+          <div class="workspace-header-copy">
+            <h1>Headline</h1>
+          </div>
+        </header>
+        <div class="workspace-event-preview is-hidden" id="workspace-event-saved-summary" aria-live="polite"></div>
+        <div class="content-pane-divider content-pane-divider-inset"></div>
+      </div>
+      <div class="workspace-event-view is-hidden" id="workspace-event-view" aria-hidden="true">
+        <header class="content-pane-header content-pane-header-workspace">
+          <div class="workspace-header-copy">
+            <h1>New Event</h1>
+          </div>
+          <div class="workspace-header-actions">
+            <button type="button" class="home-task-action" id="event-admin-close-button">Reset</button>
+            <button type="button" class="home-task-action" id="workspace-save-button">Save</button>
+          </div>
+        </header>
+        <div class="content-pane-divider"></div>
+        <section class="workspace-event-editor" aria-label="Node-based event setup">
+          <div id="event-editor-root"></div>
+        </section>
+      </div>
+    </main>
+
+    <!-- App Side Panel -->
+    <div class="app-side-panel">
+      <div class="panel-resize-handle"></div>
+      <div class="side-panel-layout">
+        <!-- Side Panel Chrome -->
+        <div class="side-panel-chrome">
+          <!-- Side Panel Toolbar -->
+          <div class="side-panel-toolbar">
+            <div class="header-left">
+              <div class="icon-container">
+                <button type="button" class="profile-button" id="profile-home-button" aria-label="Go to Home panel">
+                  <img src="assets/user-icon.png" alt="User Icon" class="user-icon" />
+                </button>
+              </div>
+              <div class="menu-item-group">
+                <button type="button" class="menu-item page-switcher-toggle" id="page-switcher-toggle" aria-haspopup="dialog" aria-expanded="false" aria-controls="page-switcher-popover">
+                  <span class="menu-text">Home</span>
+                  <img src="assets/dropdown-icon.svg" alt="" class="dropdown-icon" />
+                </button>
+                <div class="divider"></div>
+                <button type="button" class="omnibox-trigger" id="omnibox-trigger" aria-label="Open search" aria-haspopup="dialog" aria-expanded="false" aria-controls="omnibox-overlay">
+                  <img src="assets/search.svg" alt="" class="shape-icon" />
+                </button>
+              </div>
+            </div>
+            <div class="header-right">
+              <button type="button" class="icon-button" id="new-chat-button" aria-label="Start a new chat">
+                <span class="icon-bg">
+                  <img src="assets/new%20chat.svg" alt="" class="icon-img" />
+                </span>
+              </button>
+              <button type="button" class="icon-button" id="chat-list-button" aria-label="Open chat list">
+                <span class="icon-bg">
+                  <img src="assets/chat%20list.svg" alt="" class="icon-img" />
+                </span>
+              </button>
+              <div class="settings-link-wrap">
+                <button type="button" class="icon-button" id="settings-button" aria-label="Open settings">
+                  <span class="icon-bg">
+                    <img src="assets/settings.svg" alt="" class="icon-img" />
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="page-switcher-popover" id="page-switcher-popover" role="dialog" aria-label="Page switcher" aria-hidden="true">
+            <div class="page-switcher-nav">
+              <img src="assets/page-switcher-logo.svg" alt="Highspot" class="page-switcher-logo" />
+              <div class="page-switcher-divider"></div>
+              <div class="page-switcher-nav-items">
+                <button type="button" class="switcher-nav-item is-selected" aria-current="page">
+                  <span class="switcher-nav-icon-slot">
+                    <img src="assets/page-switcher-icon-deals.svg" alt="" class="switcher-nav-icon" />
+                  </span>
+                  <span>Deals</span>
+                </button>
+                <button type="button" class="switcher-nav-item">
+                  <span class="switcher-nav-icon-slot">
+                    <img src="assets/page-switcher-icon-automations.svg" alt="" class="switcher-nav-icon switcher-nav-icon-narrow" />
+                  </span>
+                  <span>Automations</span>
+                </button>
+                <button type="button" class="switcher-nav-item">
+                  <span class="switcher-nav-icon-slot">
+                    <img src="assets/page-switcher-icon-knowledge.svg" alt="" class="switcher-nav-icon" />
+                  </span>
+                  <span>Knowledge</span>
+                </button>
+                <button type="button" class="switcher-nav-item" id="events-workspace-button">
+                  <span class="switcher-nav-icon-slot">
+                    <img src="assets/page-switcher-icon-events.svg" alt="" class="switcher-nav-icon" />
+                  </span>
+                  <span>Events</span>
+                </button>
+                <button type="button" class="switcher-nav-item">
+                  <span class="switcher-nav-icon-slot">
+                    <img src="assets/page-switcher-icon-more.svg" alt="" class="switcher-nav-icon switcher-nav-icon-compact" />
+                  </span>
+                  <span>More</span>
+                </button>
+              </div>
+              <div class="page-switcher-footer">
+                <img src="assets/user-icon.png" alt="User profile" class="switcher-avatar" />
+                <button type="button" class="switcher-logout">Log out</button>
+              </div>
+            </div>
+            <div class="page-switcher-content">
+              <div class="switcher-content-header">
+                <span>My Deals</span>
+                <img src="assets/page-switcher-arrow.svg" alt="" class="switcher-content-arrow" />
+              </div>
+              <div class="page-switcher-divider"></div>
+              <div class="switcher-content-section">
+                <h4>Your upcoming meetings</h4>
+                <div class="switcher-content-row">
+                  <div class="switcher-thumb"><img src="assets/new%20chat.svg" alt="" /></div>
+                  <div class="switcher-content-copy">
+                    <strong>AWS Weekly Sync</strong>
+                    <span>Host: Vanessa C.</span>
+                    <span>Today, 11:00 AM</span>
+                  </div>
+                  <button type="button" class="switcher-row-button">Run meeting prep</button>
+                </div>
+                <div class="switcher-content-row">
+                  <div class="switcher-thumb switcher-thumb-primary"><img src="assets/chat%20list.svg" alt="" /></div>
+                  <div class="switcher-content-copy">
+                    <strong>Visa Inc stakeholder sync</strong>
+                    <span>Host: Hao L.</span>
+                    <span>Today, 3:00 PM</span>
+                  </div>
+                  <button type="button" class="switcher-row-button">Run meeting prep</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Home Panel -->
+        <div class="home-panel" id="home-panel" aria-hidden="false">
+          <div class="home-panel-scroll">
+            <div class="home-insights-stack">
+              <article class="home-insight-card home-insight-card-top">
+                <header class="home-insight-header">
+                  <div class="home-insight-title-wrap">
+                    <img src="assets/home-openai-icon.png" alt="" class="home-insight-brand-icon home-insight-brand-icon-openai" />
+                    <h2 class="home-insight-title">Open AI 2026</h2>
+                  </div>
+                  <div class="home-insight-labels">
+                    <span class="home-label home-label-primary"><strong>Deal health:</strong> <b>72</b></span>
+                    <span class="home-label home-label-secondary"><strong>Tasks:</strong> <b>6</b></span>
+                  </div>
+                </header>
+                <div class="home-insight-divider"></div>
+                <p><strong>Initiative requirements</strong>Q3 initiative requires 15% more multi-product deals for accounts over 500 seats. Add the Enterprise Security Suite upsell to Visa Global digital room.</p>
+                <p><strong>Outreach stagnation</strong>Ping the Champion at Visa for a 'Pulse Check'. The deal has been in 'Proposal' stage for 12 days without an outbound touchpoint.</p>
+              </article>
+              <article class="home-insight-card home-insight-card-middle">
+                <header class="home-insight-header">
+                  <div class="home-insight-title-wrap">
+                    <span class="home-insight-brand-icon home-insight-brand-icon-overlap">
+                      <img src="assets/home-deal-icon-base.png" alt="" class="home-insight-brand-layer" />
+                      <img src="assets/home-deal-icon-overlay.png" alt="" class="home-insight-brand-layer" />
+                    </span>
+                    <h2 class="home-insight-title">AWS expansion 2026</h2>
+                  </div>
+                  <div class="home-insight-labels">
+                    <span class="home-label home-label-primary"><strong>Deal health:</strong> <b>72</b></span>
+                    <span class="home-label home-label-secondary"><strong>Tasks:</strong> <b>6</b></span>
+                  </div>
+                </header>
+                <div class="home-insight-divider"></div>
+                <p><strong>Initiative requirements</strong>Q3 initiative requires 15% more multi-product deals for accounts over 500 seats. Add the Enterprise Security Suite upsell to Visa Global digital room.</p>
+                <p><strong>Outreach stagnation</strong>Ping the Champion at Visa for a 'Pulse Check'. The deal has been in 'Proposal' stage for 12 days without an outbound touchpoint.</p>
+              </article>
+              <article class="home-insight-card home-insight-card-bottom">
+                <header class="home-insight-header">
+                  <div class="home-insight-title-wrap">
+                    <img src="assets/home-deal-icon-base.png" alt="" class="home-insight-brand-icon" />
+                    <h2 class="home-insight-title">Visa renewal 2026</h2>
+                  </div>
+                  <div class="home-insight-labels">
+                    <span class="home-label home-label-primary"><strong>Deal health:</strong> <b>72</b></span>
+                    <span class="home-label home-label-secondary"><strong>Tasks:</strong> <b>6</b></span>
+                  </div>
+                </header>
+                <div class="home-insight-divider"></div>
+                <p><strong>Initiative requirements</strong>Q3 initiative requires 15% more multi-product deals for accounts over 500 seats. Add the Enterprise Security Suite upsell to Visa Global digital room.</p>
+                <p><strong>Outreach stagnation</strong>Ping the Champion at Visa for a 'Pulse Check'. The deal has been in 'Proposal' stage for 12 days without an outbound touchpoint.</p>
+              </article>
+            </div>
+
+            <section class="home-tasks">
+              <h2>Tasks</h2>
+              <div class="home-tasks-divider"></div>
+              <div class="home-task-list">
+                <article class="home-task-item">
+                  <div class="home-task-header">
+                    <img src="assets/home-deal-icon-base.png" alt="" class="home-task-icon" />
+                    <h3 class="home-task-title">Visa Global 2026: Digital Room</h3>
+                  </div>
+                  <p>15% increase in multi-product deals for 500+ seat accounts required. Add the <a href="#">Enterprise Security Suite</a> upsell module to the <a href="#">Visa Global digital room</a>.</p>
+                  <button type="button" class="home-task-action">+ Add to digital room</button>
+                </article>
+                <div class="home-task-separator"></div>
+                <article class="home-task-item">
+                  <div class="home-task-header">
+                    <img src="assets/home-deal-icon-base.png" alt="" class="home-task-icon" />
+                    <h3 class="home-task-title">Visa Global 2026: Digital Room</h3>
+                  </div>
+                  <p>15% increase in multi-product deals for 500+ seat accounts required. Add the <a href="#">Enterprise Security Suite</a> upsell module to the <a href="#">Visa Global digital room</a>.</p>
+                  <button type="button" class="home-task-action">+ Add to digital room</button>
+                </article>
+              </div>
+            </section>
+          </div>
+
+          <div class="prompt-composer prompt-composer-home">
+            <div
+              class="prompt-composer-input"
+              id="home-prompt-input"
+              contenteditable="true"
+              role="textbox"
+              aria-label="Ask anything..."
+              data-placeholder="Ask anything..."
+            ></div>
+            <button type="button" class="prompt-composer-submit" id="home-prompt-submit" aria-label="Submit">
+              <img src="assets/submit%20chat%20arrow.svg" alt="" class="prompt-composer-submit-icon" id="home-prompt-arrow" />
+            </button>
+          </div>
+        </div>
+
+        <div class="chat-panel" id="chat-panel">
+          <!-- Chat Title Display -->
+          <div class="chat-title-display" id="chat-title-display">
+            <div class="chat-title-content" id="chat-title-content">Implementation draft plan v1</div>
+            <button type="button" class="chat-title-edit-button" id="chat-title-edit-button" aria-label="Edit chat title">
+              <img src="assets/edit.svg" alt="" class="edit-icon" id="chat-title-action-icon" />
+            </button>
+          </div>
+          <div class="messages-area" id="messages-area"></div>
+          <div class="prompt-composer prompt-composer-chat">
+            <div class="text-input-container">
+              <div
+                class="chat-input"
+                id="chat-input"
+                contenteditable="true"
+                role="textbox"
+                aria-label="Ask anything..."
+                aria-multiline="true"
+                data-placeholder="Ask anything..."
+              ></div>
+            </div>
+            <div class="buttons-group">
+              <div class="left-buttons">
+                <div class="agent-selector">
+                  <div class="agent-text">HS Agent</div>
+                  <img src="assets/dropdown-icon.svg" alt="Dropdown" class="dropdown-icon-small" />
+                </div>
+              </div>
+              <button type="button" class="submit-button" id="submit-button" aria-label="Submit">
+                <img src="assets/submit%20chat%20arrow.svg" alt="Submit" id="submit-arrow" />
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="chat-history-panel is-hidden" id="chat-history-panel" aria-hidden="true">
+          <div class="chat-search-display">
+            <input type="search" class="chat-search-input" id="chat-search-input" placeholder="Search" aria-label="Search chats" />
+            <img src="assets/search.svg" alt="" class="chat-search-icon" />
+          </div>
+          <div class="chat-list-sections" id="chat-list-sections">
+            <section class="chat-list-section">
+              <h3 class="chat-list-heading">Today</h3>
+              <div class="chat-list-items">
+                <button type="button" class="chat-list-item" data-demo-chat="new-event-creation"><span class="chat-tag">Events</span><span class="chat-item-title">New event creation</span></button>
+                <button type="button" class="chat-list-item" data-demo-chat="openai-deal"><span class="chat-tag">OpenAI 2026</span><span class="chat-item-title">Deal progression plan</span></button>
+                <button type="button" class="chat-list-item"><span class="chat-tag">Copilot role play</span><span class="chat-item-title">AI copilot demo prep</span></button>
+                <button type="button" class="chat-list-item"><span class="chat-tag">Home</span><span class="chat-item-title">Analytics dashboard walkthrough</span></button>
+              </div>
+            </section>
+            <section class="chat-list-section">
+              <h3 class="chat-list-heading">Recent</h3>
+              <div class="chat-list-items">
+                <button type="button" class="chat-list-item"><span class="chat-tag">Deals</span><span class="chat-item-title">Win-loss review summary</span></button>
+                <button type="button" class="chat-list-item"><span class="chat-tag">Home</span><span class="chat-item-title">Content strategy draft</span></button>
+                <button type="button" class="chat-list-item"><span class="chat-tag">Spring Launch kickoff</span><span class="chat-item-title">Content performance review</span></button>
+              </div>
+            </section>
+            <section class="chat-list-section">
+              <h3 class="chat-list-heading">Older</h3>
+              <div class="chat-list-items">
+                <button type="button" class="chat-list-item"><span class="chat-tag">Acme renewal 2026</span><span class="chat-item-title">Renewal strategy planning</span></button>
+                <button type="button" class="chat-list-item"><span class="chat-tag">Deals</span><span class="chat-item-title">QBR prep</span></button>
+                <button type="button" class="chat-list-item"><span class="chat-tag">Spring launch scorecard</span><span class="chat-item-title">Data analytics suite expansio...</span></button>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="omnibox-overlay" id="omnibox-overlay" role="dialog" aria-modal="true" aria-label="Search Arctic AI" aria-hidden="true">
+      <div class="omnibox-backdrop" data-omnibox-close></div>
+      <section class="omnibox-panel">
+        <div class="omnibox-search-row">
+          <img src="assets/search.svg" alt="" class="omnibox-search-icon" />
+          <input type="search" class="omnibox-input" id="omnibox-input" placeholder="Search deals, tasks, meetings..." aria-label="Search prototype items" autocomplete="off" />
+        </div>
+      </section>
+    </div>
+    <div class="design-breakdown-modal" id="design-breakdown-modal" role="dialog" aria-modal="true" aria-label="Design and layout breakdown" aria-hidden="true">
+      <div class="design-breakdown-backdrop" data-design-modal-close></div>
+      <section class="design-breakdown-panel">
+        <header class="design-breakdown-header">
+          <h2>Design and layout breakdown</h2>
+          <button type="button" class="design-breakdown-close" id="design-breakdown-close" aria-label="Close design and layout breakdown">Close</button>
+        </header>
+        <iframe class="design-breakdown-frame" src="design.html" title="Design and layout breakdown"></iframe>
+      </section>
+    </div>
+  </div>
+</body>
+</html>

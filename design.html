@@ -1,0 +1,1337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Arctic AI - Design Reference</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    body {
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 86% 4%, rgba(204, 216, 224, 0.22), rgba(204, 216, 224, 0) 34%),
+        linear-gradient(135deg, rgba(251, 252, 253, 0.96), rgba(236, 242, 247, 0.9));
+      color: var(--text-secondary);
+    }
+
+    .design-page {
+      width: min(1180px, calc(100% - 48px));
+      margin: 0 auto;
+      padding: 48px 0 64px;
+    }
+
+    .design-hero,
+    .design-section,
+    .design-card,
+    .design-specimen,
+    .design-mini-panel,
+    .design-callout {
+      background-color: var(--bg-glass);
+      backdrop-filter: var(--blur-standard);
+      -webkit-backdrop-filter: var(--blur-standard);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-md);
+      box-shadow: var(--glass-shadow);
+    }
+
+    .design-hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(300px, 0.8fr);
+      gap: var(--space-xl);
+      padding: var(--space-xl);
+      margin-bottom: var(--space-xl);
+    }
+
+    .design-kicker,
+    .design-label,
+    .design-code,
+    .design-token,
+    .design-status {
+      font-family: var(--font-family-base);
+      font-size: var(--text-xs);
+      line-height: var(--line-height-md);
+      letter-spacing: var(--letter-spacing-wide);
+    }
+
+    .design-kicker,
+    .design-label {
+      color: #99a6ad;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .design-hero h1 {
+      margin: var(--space-2xs) 0 var(--space-md);
+      max-width: 720px;
+    }
+
+    .design-hero p {
+      max-width: 680px;
+    }
+
+    .design-nav {
+      display: grid;
+      gap: var(--space-2xs);
+      align-self: start;
+    }
+
+    .design-nav a {
+      display: flex;
+      justify-content: space-between;
+      gap: var(--space-sm);
+      padding: var(--space-sm);
+      border-radius: var(--radius-sm);
+      color: var(--text-primary);
+      background: rgba(255, 255, 255, 0.42);
+    }
+
+    .design-section {
+      padding: var(--space-xl);
+      margin-bottom: var(--space-xl);
+    }
+
+    .design-section-header {
+      display: grid;
+      gap: var(--space-2xs);
+      margin-bottom: var(--space-xl);
+    }
+
+    .design-section-header p {
+      max-width: 760px;
+    }
+
+    .design-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: var(--space-md);
+    }
+
+    .design-grid-two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .design-card,
+    .design-specimen {
+      padding: var(--space-lg);
+    }
+
+    .design-card {
+      display: grid;
+      gap: var(--space-sm);
+    }
+
+    .design-reference-list {
+      display: grid;
+      gap: var(--space-md);
+    }
+
+    .design-reference-card {
+      display: grid;
+      grid-template-columns: minmax(280px, 0.86fr) minmax(320px, 1fr);
+      gap: var(--space-md);
+      align-items: stretch;
+    }
+
+    .design-reference-visual,
+    .design-reference-detail {
+      display: grid;
+      align-content: start;
+      gap: var(--space-sm);
+      padding: var(--space-lg);
+      border-radius: var(--radius-md);
+      border: 1px solid rgba(51, 78, 92, 0.1);
+      background: rgba(255, 255, 255, 0.52);
+      box-shadow: 0 18px 50px rgba(51, 78, 92, 0.08);
+    }
+
+    .design-reference-detail {
+      background: rgba(251, 252, 253, 0.56);
+    }
+
+    .design-component-stage {
+      position: relative;
+      display: grid;
+      align-items: start;
+      gap: var(--space-md);
+      min-height: 220px;
+      padding: var(--space-xl);
+      overflow: hidden;
+      border: 1px solid rgba(51, 78, 92, 0.16);
+      border-radius: var(--radius-md);
+      background:
+        radial-gradient(circle at 92% 8%, rgba(42, 186, 248, 0.14), rgba(42, 186, 248, 0) 30%),
+        linear-gradient(135deg, rgba(232, 239, 245, 0.88), rgba(251, 252, 253, 0.94));
+      box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.7),
+        0 18px 42px rgba(51, 78, 92, 0.12);
+    }
+
+    .design-component-stage::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(51, 78, 92, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(51, 78, 92, 0.035) 1px, transparent 1px);
+      background-size: 28px 28px;
+      pointer-events: none;
+    }
+
+    .design-component-stage > * {
+      position: relative;
+      z-index: 1;
+    }
+
+    .design-component-stage .menu-item-group,
+    .design-component-stage .icon-bg,
+    .design-component-stage .chat-title-display,
+    .design-component-stage .chat-search-display,
+    .design-component-stage .home-insight-card,
+    .design-component-stage .prompt-composer-home,
+    .design-component-stage .prompt-composer-chat,
+    .design-component-stage .agent-selector {
+      border-color: rgba(51, 78, 92, 0.16);
+      box-shadow:
+        0 12px 30px rgba(51, 78, 92, 0.12),
+        var(--glass-shadow);
+    }
+
+    .design-side-panel-stage {
+      min-height: 600px;
+      padding: var(--space-lg);
+    }
+
+    .design-side-panel-stage .app-side-panel {
+      position: relative;
+      top: auto;
+      left: auto;
+      width: min(360px, 100%);
+      min-width: 0;
+      max-width: none;
+      height: 560px;
+    }
+
+    .design-side-panel-stage .panel-resize-handle {
+      left: calc(100% + var(--space-sm));
+      background: rgba(51, 78, 92, 0.12);
+      border-radius: var(--radius-full);
+    }
+
+    .design-side-panel-stage .home-insights-stack {
+      padding-bottom: 52px;
+    }
+
+    .design-side-panel-stage .home-insight-card-middle {
+      --card-offset-y: 26px;
+    }
+
+    .design-side-panel-stage .home-insight-card-bottom {
+      --card-offset-y: 52px;
+    }
+
+    .design-actual-panel {
+      width: min(360px, 100%);
+      min-height: 360px;
+    }
+
+    .design-actual-panel .home-panel,
+    .design-actual-panel .chat-panel,
+    .design-actual-panel .chat-history-panel {
+      min-height: 360px;
+      margin-top: 0;
+    }
+
+    .design-actual-panel .home-panel-scroll {
+      max-height: 360px;
+      padding-bottom: 0;
+      overflow: visible;
+    }
+
+    .design-actual-panel .home-insights-stack {
+      padding-bottom: 52px;
+    }
+
+    .design-actual-panel .home-insight-card-middle {
+      --card-offset-y: 26px;
+    }
+
+    .design-actual-panel .home-insight-card-bottom {
+      --card-offset-y: 52px;
+    }
+
+    .design-actual-composer,
+    .design-actual-chat,
+    .design-actual-history {
+      position: relative;
+      width: min(420px, 100%);
+      min-height: 220px;
+    }
+
+    .design-actual-composer .prompt-composer-chat {
+      position: relative;
+      left: auto;
+      right: auto;
+      bottom: auto;
+    }
+
+    .design-actual-chat {
+      min-height: 330px;
+    }
+
+    .design-actual-chat .chat-panel {
+      min-height: 330px;
+      margin-top: 0;
+    }
+
+    .design-actual-chat .messages-area {
+      gap: var(--space-lg);
+      padding-top: calc(var(--button-size) + var(--space-sm));
+      padding-bottom: calc(var(--prompt-composer-chat-height) + var(--space-md));
+      overflow: visible;
+    }
+
+    .design-actual-history {
+      min-height: 300px;
+    }
+
+    .design-actual-history .chat-history-panel {
+      min-height: 300px;
+      margin-top: 0;
+    }
+
+    .design-actual-history .chat-list-sections {
+      overflow: visible;
+    }
+
+    .design-actual-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: var(--space-md);
+    }
+
+    .design-actual-switcher {
+      position: relative;
+      width: 100%;
+      min-height: 430px;
+      overflow: hidden;
+    }
+
+    .design-actual-switcher .page-switcher-popover {
+      position: relative;
+      top: auto;
+      left: auto;
+      transform: scale(0.58);
+      transform-origin: top left;
+    }
+
+    .design-actual-switcher .omnibox-panel {
+      position: absolute;
+      right: 0;
+      bottom: 0;
+      width: min(340px, 78%);
+      padding: var(--space-sm);
+      box-shadow: 0 18px 42px rgba(51, 78, 92, 0.18), var(--glass-shadow);
+    }
+
+    .design-reference-meta {
+      display: grid;
+      gap: var(--space-2xs);
+    }
+
+    .design-reference-meta strong {
+      color: var(--text-primary);
+      font-size: var(--text-xs);
+      line-height: var(--line-height-md);
+    }
+
+    .design-card h3,
+    .design-specimen h3 {
+      color: var(--text-primary);
+    }
+
+    .design-card p,
+    .design-specimen p {
+      line-height: var(--line-height-relaxed);
+    }
+
+    .design-code-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-2xs);
+      margin-top: var(--space-2xs);
+    }
+
+    .design-code,
+    .design-token,
+    .design-status {
+      display: inline-flex;
+      width: fit-content;
+      align-items: center;
+      border-radius: var(--radius-xs);
+      white-space: nowrap;
+    }
+
+    .design-code {
+      padding: var(--space-4xs) var(--space-2xs);
+      color: var(--text-primary);
+      background: #c7d2dc;
+    }
+
+    .design-token {
+      padding: var(--space-3xs) var(--space-2xs);
+      color: var(--text-secondary);
+      background: #e6ebf0;
+      font-weight: 500;
+    }
+
+    .design-status {
+      padding: var(--space-3xs) var(--space-2xs);
+      color: var(--background-base);
+      background: var(--accent-blue);
+      font-weight: 700;
+    }
+
+    .design-map {
+      position: relative;
+      display: grid;
+      grid-template-columns: 340px minmax(280px, 1fr);
+      gap: var(--space-lg);
+      min-height: 360px;
+      padding: var(--space-lg);
+      overflow: hidden;
+      border-radius: var(--radius-md);
+      background:
+        linear-gradient(90deg, rgba(204, 216, 224, 0.16), rgba(255, 255, 255, 0.28)),
+        rgba(251, 252, 253, 0.44);
+    }
+
+    .design-mini-panel {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-md);
+      padding: var(--space-md);
+      min-height: 320px;
+      border-radius: var(--radius-sm);
+    }
+
+    .design-mini-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-sm);
+    }
+
+    .design-mini-avatar {
+      width: 38px;
+      height: 38px;
+      border-radius: var(--radius-full);
+      background: linear-gradient(135deg, #c7d2dc, #fbfcfd);
+      border: 1px solid var(--glass-border);
+    }
+
+    .design-mini-controls {
+      display: flex;
+      gap: var(--space-2xs);
+    }
+
+    .design-mini-control {
+      width: var(--button-size);
+      height: var(--button-size);
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-sm);
+      background: rgba(251, 252, 253, 0.65);
+    }
+
+    .design-mini-home,
+    .design-mini-chat,
+    .design-mini-list {
+      display: grid;
+      gap: var(--space-sm);
+      padding: var(--space-md);
+      border-radius: var(--radius-sm);
+      background: rgba(255, 255, 255, 0.34);
+    }
+
+    .design-panel-note {
+      color: var(--text-secondary);
+      font-size: var(--text-xs);
+      line-height: var(--line-height-normal);
+    }
+
+    .design-panel-view-type {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-sm);
+    }
+
+    .design-mini-line {
+      height: 8px;
+      border-radius: var(--radius-full);
+      background: rgba(51, 78, 92, 0.18);
+    }
+
+    .design-mini-line.short {
+      width: 56%;
+    }
+
+    .design-mini-line.medium {
+      width: 76%;
+    }
+
+    .design-workspace {
+      padding: var(--space-xl);
+      min-height: 320px;
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-md);
+      background: rgba(251, 252, 253, 0.62);
+      box-shadow: inset 0 0 0 1px var(--glass-panel-edge);
+    }
+
+    .design-workspace-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-md);
+      padding-bottom: var(--space-xl);
+      border-bottom: 1px solid rgba(51, 78, 92, 0.12);
+      margin-bottom: var(--space-xl);
+    }
+
+    .design-workspace-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: var(--space-md);
+    }
+
+    .design-component-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: var(--space-sm);
+      margin-top: var(--space-sm);
+    }
+
+    .design-button {
+      min-height: 32px;
+      border: 1px solid var(--text-secondary);
+      border-radius: var(--radius-xs);
+      padding: var(--space-3xs) var(--space-2xs);
+      color: var(--text-secondary);
+      background: transparent;
+      font: 500 var(--text-sm) / 1.3 var(--font-family-base);
+    }
+
+    .design-icon-button {
+      width: var(--button-size);
+      height: var(--button-size);
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-sm);
+      background: rgba(251, 252, 253, 0.65);
+      box-shadow: var(--glass-shadow);
+    }
+
+    .design-submit {
+      width: var(--size-28);
+      height: var(--size-28);
+      display: grid;
+      place-items: center;
+      border: 0;
+      border-radius: var(--radius-full);
+      background: var(--accent-blue);
+    }
+
+    .design-submit img,
+    .design-icon-button img {
+      width: var(--icon-size-small);
+      height: var(--icon-size-small);
+      object-fit: contain;
+    }
+
+    .design-composer {
+      display: grid;
+      gap: var(--space-md);
+      padding: var(--space-sm);
+      min-height: 140px;
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-md);
+      background: rgba(251, 252, 253, 0.64);
+      box-shadow: var(--glass-shadow);
+    }
+
+    .design-composer-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: var(--space-md);
+    }
+
+    .design-chat-bubble {
+      width: fit-content;
+      max-width: 70%;
+      padding: var(--size-10) var(--space-sm);
+      border-radius: var(--radius-sm);
+      color: var(--background-base);
+      background: var(--accent-blue);
+      font-size: var(--text-sm);
+      line-height: var(--line-height-normal);
+      margin-left: auto;
+    }
+
+    .design-ai-response {
+      display: grid;
+      gap: var(--space-sm);
+    }
+
+    .design-ai-divider {
+      height: 1px;
+      background: var(--divider-color);
+    }
+
+    .design-switcher {
+      display: grid;
+      grid-template-columns: 144px minmax(0, 1fr);
+      gap: var(--space-xl);
+      padding: var(--space-xl);
+      border-radius: var(--radius-sm);
+      background: var(--background-base);
+      box-shadow: var(--switcher-shadow);
+    }
+
+    .design-switcher-nav,
+    .design-switcher-content {
+      display: grid;
+      gap: var(--space-md);
+      align-content: start;
+    }
+
+    .design-switcher-content {
+      padding: var(--space-lg);
+      border-radius: var(--radius-sm);
+      background: rgba(242, 245, 247, 0.7);
+    }
+
+    .design-switcher-item,
+    .design-chat-list-item {
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+      color: var(--text-primary);
+    }
+
+    .design-switcher-dot {
+      width: var(--size-14);
+      height: var(--size-14);
+      border-radius: var(--radius-xs);
+      background: #c7d2dc;
+    }
+
+    .design-table-wrap {
+      overflow-x: auto;
+      border: 1px solid rgba(51, 78, 92, 0.12);
+      border-radius: var(--radius-sm);
+      background: rgba(255, 255, 255, 0.35);
+    }
+
+    .design-table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 760px;
+    }
+
+    .design-table th,
+    .design-table td {
+      padding: var(--space-sm);
+      border-bottom: 1px solid rgba(51, 78, 92, 0.12);
+      text-align: left;
+      vertical-align: top;
+      color: var(--text-secondary);
+      font-size: var(--text-sm);
+      line-height: var(--line-height-normal);
+    }
+
+    .design-table th {
+      color: var(--text-primary);
+      font-weight: 600;
+      background: rgba(255, 255, 255, 0.38);
+    }
+
+    .design-table tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .design-callout {
+      display: grid;
+      gap: var(--space-sm);
+      padding: var(--space-lg);
+      margin-top: var(--space-md);
+      background: rgba(251, 252, 253, 0.72);
+    }
+
+    @media (max-width: 900px) {
+      .design-hero,
+      .design-map,
+      .design-grid,
+      .design-grid-two,
+      .design-reference-card,
+      .design-workspace-grid,
+      .design-switcher {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="design-page">
+    <header class="design-hero">
+      <div>
+        <p class="design-kicker">Arctic AI Starter Kit</p>
+        <h1>Design reference for app sections and repeatable patterns</h1>
+        <p>This page defines the discrete UI regions in the prototype and visualizes the repeatable patterns used across the HTML and CSS.</p>
+      </div>
+      <nav class="design-nav" aria-label="Design reference sections">
+        <a href="#app-shell"><span>App Shell</span><span>01</span></a>
+        <a href="#patterns"><span>Patterns and Components</span><span>02</span></a>
+      </nav>
+    </header>
+
+    <section class="design-section" id="app-shell" aria-labelledby="app-shell-title">
+      <header class="design-section-header">
+        <p class="design-kicker">01 App Shell</p>
+        <h2 id="app-shell-title">Primary application regions</h2>
+        <p>The current prototype has four major layers: the atmospheric background, the persistent left side panel, the main content workspace, and transient overlays for search or page switching.</p>
+      </header>
+
+      <div class="design-map" aria-label="App shell diagram">
+        <aside class="design-mini-panel" aria-label="Persistent side panel specimen">
+          <div class="design-mini-toolbar">
+            <span class="design-mini-avatar" aria-hidden="true"></span>
+            <div class="design-mini-controls" aria-hidden="true">
+              <span class="design-mini-control"></span>
+              <span class="design-mini-control"></span>
+            </div>
+          </div>
+          <p class="design-panel-note">One persistent side panel shell. It swaps between these three panel views rather than showing them all at once.</p>
+          <div class="design-mini-home">
+            <div class="design-panel-view-type">
+              <span class="design-token">home-panel</span>
+              <span class="design-label">View 1</span>
+            </div>
+            <span class="design-mini-line"></span>
+            <span class="design-mini-line medium"></span>
+            <span class="design-mini-line short"></span>
+          </div>
+          <div class="design-mini-chat">
+            <div class="design-panel-view-type">
+              <span class="design-token">chat-panel</span>
+              <span class="design-label">View 2</span>
+            </div>
+            <span class="design-chat-bubble">User message</span>
+            <span class="design-mini-line medium"></span>
+          </div>
+          <div class="design-mini-list">
+            <div class="design-panel-view-type">
+              <span class="design-token">chat-history-panel</span>
+              <span class="design-label">View 3</span>
+            </div>
+            <span class="design-mini-line"></span>
+            <span class="design-mini-line short"></span>
+          </div>
+        </aside>
+
+        <section class="design-workspace" aria-label="Content workspace specimen">
+          <div class="design-workspace-header">
+            <h3>Content workspace</h3>
+            <span class="design-code">workspace-panel</span>
+          </div>
+          <div class="design-workspace-grid">
+            <article class="design-card">
+              <span class="design-label">Workspace content</span>
+              <h3>Main product canvas</h3>
+              <p>Use this fixed glass panel for page-specific exploration, list-detail layouts, or prototype content that should sit outside the persistent side panel.</p>
+            </article>
+            <article class="design-card">
+              <span class="design-label">Overlay layer</span>
+              <h3>Transient surfaces</h3>
+              <p>Search and page switching should read as temporary layers above the shell, not as permanent workspace content.</p>
+            </article>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section class="design-section" id="patterns" aria-labelledby="patterns-title">
+      <header class="design-section-header">
+        <p class="design-kicker">02 Patterns and Components</p>
+        <h2 id="patterns-title">Visual reference with HTML/CSS hooks</h2>
+        <p>Each item pairs the pattern or component with the selectors used to find it in <code>index.html</code> and style it in <code>styles.css</code>.</p>
+      </header>
+
+      <div class="design-reference-list">
+        <article class="design-reference-card">
+          <div class="design-reference-visual">
+            <span class="design-label">Pattern</span>
+            <h3>Resizable side panel</h3>
+            <div class="design-component-stage design-side-panel-stage">
+              <div class="app-side-panel">
+                <div class="panel-resize-handle"></div>
+                <div class="side-panel-layout">
+                  <div class="side-panel-chrome">
+                    <div class="side-panel-toolbar">
+                      <div class="header-left">
+                        <div class="icon-container">
+                          <button type="button" class="profile-button" aria-label="Go to Home panel">
+                            <img src="assets/user-icon.png" alt="" class="user-icon">
+                          </button>
+                        </div>
+                        <div class="menu-item-group">
+                          <button type="button" class="menu-item">
+                            <span class="menu-text">Home</span>
+                            <img src="assets/dropdown-icon.svg" alt="" class="dropdown-icon">
+                          </button>
+                          <div class="divider"></div>
+                          <button type="button" class="omnibox-trigger" aria-label="Open search">
+                            <img src="assets/search.svg" alt="" class="shape-icon">
+                          </button>
+                        </div>
+                      </div>
+                      <div class="header-right">
+                        <button type="button" class="icon-button" aria-label="Start a new chat">
+                          <span class="icon-bg">
+                            <img src="assets/new%20chat.svg" alt="" class="icon-img">
+                          </span>
+                        </button>
+                        <button type="button" class="icon-button" aria-label="Open chat list">
+                          <span class="icon-bg">
+                            <img src="assets/chat%20list.svg" alt="" class="icon-img">
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="home-panel" aria-hidden="false">
+                    <div class="home-panel-scroll">
+                      <div class="home-insights-stack">
+                        <article class="home-insight-card home-insight-card-top">
+                          <header class="home-insight-header">
+                            <div class="home-insight-title-wrap">
+                              <img src="assets/home-openai-icon.png" alt="" class="home-insight-brand-icon home-insight-brand-icon-openai">
+                              <h2 class="home-insight-title">Open AI 2026</h2>
+                            </div>
+                            <div class="home-insight-labels">
+                              <span class="home-label home-label-primary"><strong>Deal health:</strong> <b>72</b></span>
+                              <span class="home-label home-label-secondary"><strong>Tasks:</strong> <b>6</b></span>
+                            </div>
+                          </header>
+                          <div class="home-insight-divider"></div>
+                          <p><strong>Initiative requirements</strong>Add the Enterprise Security Suite upsell to Visa Global digital room.</p>
+                        </article>
+                        <article class="home-insight-card home-insight-card-middle">
+                          <header class="home-insight-header">
+                            <div class="home-insight-title-wrap">
+                              <img src="assets/home-deal-icon-base.png" alt="" class="home-insight-brand-icon">
+                              <h2 class="home-insight-title">AWS expansion 2026</h2>
+                            </div>
+                          </header>
+                        </article>
+                        <article class="home-insight-card home-insight-card-bottom">
+                          <header class="home-insight-header">
+                            <div class="home-insight-title-wrap">
+                              <img src="assets/home-deal-icon-base.png" alt="" class="home-insight-brand-icon">
+                              <h2 class="home-insight-title">Visa renewal 2026</h2>
+                            </div>
+                          </header>
+                        </article>
+                      </div>
+                      <section class="home-tasks">
+                        <h2>Tasks</h2>
+                        <div class="home-tasks-divider"></div>
+                        <article class="home-task-item">
+                          <div class="home-task-header">
+                            <img src="assets/home-deal-icon-base.png" alt="" class="home-task-icon">
+                            <h3 class="home-task-title">Visa Global 2026: Digital Room</h3>
+                          </div>
+                          <button type="button" class="home-task-action">+ Add to digital room</button>
+                        </article>
+                      </section>
+                    </div>
+                    <div class="prompt-composer prompt-composer-home">
+                      <div class="prompt-composer-input" contenteditable="true" role="textbox" aria-label="Ask anything..." data-placeholder="Ask anything..."></div>
+                      <button type="button" class="prompt-composer-submit" aria-label="Submit">
+                        <img src="assets/submit%20chat%20arrow.svg" alt="" class="prompt-composer-submit-icon">
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="design-reference-detail">
+            <h3>Persistent panel shell</h3>
+            <p>In <code>index.html</code>, this is the left-side application region containing the resize handle, panel layout, chrome, and swappable panel views.</p>
+            <div class="design-reference-meta">
+              <strong>HTML</strong>
+              <div class="design-code-list">
+                <span class="design-code">app-side-panel</span>
+                <span class="design-code">panel-resize-handle</span>
+                <span class="design-code">side-panel-layout</span>
+              </div>
+            </div>
+            <div class="design-reference-meta">
+              <strong>CSS</strong>
+              <div class="design-code-list">
+                <span class="design-code">--app-side-panel-width</span>
+                <span class="design-code">--app-side-panel-max-width</span>
+                <span class="design-code">panel-resize-handle:hover</span>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="design-reference-card">
+          <div class="design-reference-visual">
+            <span class="design-label">Pattern</span>
+            <h3>Panel chrome controls</h3>
+            <div class="design-component-stage">
+              <div class="side-panel-chrome">
+                <div class="side-panel-toolbar">
+                  <div class="header-left">
+                    <div class="icon-container">
+                      <button type="button" class="profile-button" aria-label="Go to Home panel">
+                        <img src="assets/user-icon.png" alt="" class="user-icon">
+                      </button>
+                    </div>
+                    <div class="menu-item-group">
+                      <button type="button" class="menu-item">
+                        <span class="menu-text">Home</span>
+                        <img src="assets/dropdown-icon.svg" alt="" class="dropdown-icon">
+                      </button>
+                      <div class="divider"></div>
+                      <button type="button" class="omnibox-trigger" aria-label="Open search">
+                        <img src="assets/search.svg" alt="" class="shape-icon">
+                      </button>
+                    </div>
+                  </div>
+                  <div class="header-right">
+                    <button type="button" class="icon-button" aria-label="Start a new chat">
+                      <span class="icon-bg"><img src="assets/new%20chat.svg" alt="" class="icon-img"></span>
+                    </button>
+                    <button type="button" class="icon-button" aria-label="Open chat list">
+                      <span class="icon-bg"><img src="assets/chat%20list.svg" alt="" class="icon-img"></span>
+                    </button>
+                    <button type="button" class="icon-button" aria-label="Open settings">
+                      <span class="icon-bg"><img src="assets/settings.svg" alt="" class="icon-img"></span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="design-reference-detail">
+            <h3>Header and menu actions</h3>
+            <p>In <code>index.html</code>, these controls sit inside the side panel chrome and trigger the page switcher, omnibox, new chat view, chat history, and settings menu.</p>
+            <div class="design-reference-meta">
+              <strong>HTML</strong>
+              <div class="design-code-list">
+                <span class="design-code">side-panel-chrome</span>
+                <span class="design-code">side-panel-toolbar</span>
+                <span class="design-code">menu-item-group</span>
+                <span class="design-code">icon-button</span>
+              </div>
+            </div>
+            <div class="design-reference-meta">
+              <strong>CSS</strong>
+              <div class="design-code-list">
+                <span class="design-code">header-left</span>
+                <span class="design-code">header-right</span>
+                <span class="design-code">icon-bg</span>
+                <span class="design-code">settings-menu</span>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="design-reference-card">
+          <div class="design-reference-visual">
+            <span class="design-label">Pattern</span>
+            <h3>Home insight feed</h3>
+            <div class="design-component-stage">
+              <div class="design-actual-panel">
+                <div class="home-panel" aria-hidden="false">
+                  <div class="home-panel-scroll">
+                    <div class="home-insights-stack">
+                      <article class="home-insight-card home-insight-card-top">
+                        <header class="home-insight-header">
+                          <div class="home-insight-title-wrap">
+                            <img src="assets/home-openai-icon.png" alt="" class="home-insight-brand-icon home-insight-brand-icon-openai">
+                            <h2 class="home-insight-title">Open AI 2026</h2>
+                          </div>
+                          <div class="home-insight-labels">
+                            <span class="home-label home-label-primary"><strong>Deal health:</strong> <b>72</b></span>
+                            <span class="home-label home-label-secondary"><strong>Tasks:</strong> <b>6</b></span>
+                          </div>
+                        </header>
+                        <div class="home-insight-divider"></div>
+                        <p><strong>Initiative requirements</strong>Add the Enterprise Security Suite upsell to Visa Global digital room.</p>
+                        <p><strong>Outreach stagnation</strong>Ping the Champion at Visa for a pulse check.</p>
+                      </article>
+                      <article class="home-insight-card home-insight-card-middle">
+                        <header class="home-insight-header">
+                          <div class="home-insight-title-wrap">
+                            <img src="assets/home-deal-icon-base.png" alt="" class="home-insight-brand-icon">
+                            <h2 class="home-insight-title">AWS expansion 2026</h2>
+                          </div>
+                        </header>
+                      </article>
+                      <article class="home-insight-card home-insight-card-bottom">
+                        <header class="home-insight-header">
+                          <div class="home-insight-title-wrap">
+                            <img src="assets/home-deal-icon-base.png" alt="" class="home-insight-brand-icon">
+                            <h2 class="home-insight-title">Visa renewal 2026</h2>
+                          </div>
+                        </header>
+                      </article>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="design-reference-detail">
+            <h3>Home panel content</h3>
+            <p>In <code>index.html</code>, the home view combines stacked insight cards, task rows, and a fixed prompt composer within the side panel layout.</p>
+            <div class="design-reference-meta">
+              <strong>HTML</strong>
+              <div class="design-code-list">
+                <span class="design-code">home-panel</span>
+                <span class="design-code">home-panel-scroll</span>
+                <span class="design-code">home-insight-card</span>
+                <span class="design-code">home-task-item</span>
+              </div>
+            </div>
+            <div class="design-reference-meta">
+              <strong>CSS</strong>
+              <div class="design-code-list">
+                <span class="design-code">home-insights-stack</span>
+                <span class="design-code">home-insight-labels</span>
+                <span class="design-code">home-task-action</span>
+                <span class="design-code">prompt-composer-home</span>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="design-reference-card">
+          <div class="design-reference-visual">
+            <span class="design-label">Component</span>
+            <h3>Prompt composer</h3>
+            <div class="design-component-stage">
+              <div class="design-actual-composer">
+                <div class="prompt-composer prompt-composer-chat">
+                  <div class="text-input-container">
+                    <div class="chat-input" contenteditable="true" role="textbox" aria-label="Ask anything..." data-placeholder="Ask anything..."></div>
+                  </div>
+                  <div class="buttons-group">
+                    <div class="left-buttons">
+                      <div class="agent-selector">
+                        <div class="agent-text">HS Agent</div>
+                        <img src="assets/dropdown-icon.svg" alt="" class="dropdown-icon-small">
+                      </div>
+                    </div>
+                    <button type="button" class="submit-button" aria-label="Submit">
+                      <img src="assets/submit%20chat%20arrow.svg" alt="">
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="design-reference-detail">
+            <h3>Shared query input</h3>
+            <p>In <code>index.html</code>, the composer appears as a home-panel variant and a chat-panel variant. Both share the same base composer class.</p>
+            <div class="design-reference-meta">
+              <strong>HTML</strong>
+              <div class="design-code-list">
+                <span class="design-code">prompt-composer</span>
+                <span class="design-code">prompt-composer-home</span>
+                <span class="design-code">prompt-composer-chat</span>
+                <span class="design-code">contenteditable</span>
+              </div>
+            </div>
+            <div class="design-reference-meta">
+              <strong>CSS</strong>
+              <div class="design-code-list">
+                <span class="design-code">prompt-composer-input</span>
+                <span class="design-code">text-input-container</span>
+                <span class="design-code">buttons-group</span>
+                <span class="design-code">submit-button</span>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="design-reference-card">
+          <div class="design-reference-visual">
+            <span class="design-label">Pattern</span>
+            <h3>Conversation view</h3>
+            <div class="design-component-stage">
+              <div class="design-actual-chat">
+                <div class="chat-panel">
+                  <div class="chat-title-display">
+                    <div class="chat-title-content">Implementation draft plan v1</div>
+                    <button type="button" class="chat-title-edit-button" aria-label="Edit chat title">
+                      <img src="assets/edit.svg" alt="" class="edit-icon">
+                    </button>
+                  </div>
+                  <div class="messages-area has-bottom-clearance">
+                    <div class="user-message-bubble">Where does this deal stand?</div>
+                    <div class="ai-response">
+                      <div>
+                        <h3 class="ai-response-heading">Recommended action</h3>
+                        <p class="ai-response-text">Send a short pulse-check note and update the digital room with the relevant upsell module.</p>
+                      </div>
+                      <div class="ai-response-divider"></div>
+                    </div>
+                  </div>
+                  <div class="prompt-composer prompt-composer-chat">
+                    <div class="text-input-container">
+                      <div class="chat-input" contenteditable="true" role="textbox" aria-label="Ask anything..." data-placeholder="Ask anything..."></div>
+                    </div>
+                    <div class="buttons-group">
+                      <div class="left-buttons">
+                        <div class="agent-selector">
+                          <div class="agent-text">HS Agent</div>
+                          <img src="assets/dropdown-icon.svg" alt="" class="dropdown-icon-small">
+                        </div>
+                      </div>
+                      <button type="button" class="submit-button" aria-label="Submit">
+                        <img src="assets/submit%20chat%20arrow.svg" alt="">
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="design-reference-detail">
+            <h3>Chat panel messages</h3>
+            <p>In <code>index.html</code>, the chat view includes floating title chrome, an empty message container populated by script, and the fixed chat composer.</p>
+            <div class="design-reference-meta">
+              <strong>HTML</strong>
+              <div class="design-code-list">
+                <span class="design-code">chat-panel</span>
+                <span class="design-code">chat-title-display</span>
+                <span class="design-code">messages-area</span>
+                <span class="design-code">chat-input</span>
+              </div>
+            </div>
+            <div class="design-reference-meta">
+              <strong>CSS</strong>
+              <div class="design-code-list">
+                <span class="design-code">user-message-bubble</span>
+                <span class="design-code">ai-response</span>
+                <span class="design-code">ai-response-divider</span>
+                <span class="design-code">prompt-composer-chat</span>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="design-reference-card">
+          <div class="design-reference-visual">
+            <span class="design-label">Pattern</span>
+            <h3>Chat history list</h3>
+            <div class="design-component-stage">
+              <div class="design-actual-history">
+                <div class="chat-history-panel" aria-hidden="false">
+                  <div class="chat-search-display">
+                    <input type="search" class="chat-search-input" placeholder="Search" aria-label="Search chats">
+                    <img src="assets/search.svg" alt="" class="chat-search-icon">
+                  </div>
+                  <div class="chat-list-sections">
+                    <section class="chat-list-section">
+                      <h3 class="chat-list-heading">Today</h3>
+                      <div class="chat-list-items">
+                        <button type="button" class="chat-list-item"><span class="chat-tag">OpenAI 2026</span><span class="chat-item-title">Deal progression plan</span></button>
+                        <button type="button" class="chat-list-item"><span class="chat-tag">Home</span><span class="chat-item-title">Analytics dashboard walkthrough</span></button>
+                      </div>
+                    </section>
+                    <section class="chat-list-section">
+                      <h3 class="chat-list-heading">Recent</h3>
+                      <div class="chat-list-items">
+                        <button type="button" class="chat-list-item"><span class="chat-tag">Deals</span><span class="chat-item-title">Win-loss review summary</span></button>
+                      </div>
+                    </section>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="design-reference-detail">
+            <h3>Searchable panel list</h3>
+            <p>In <code>index.html</code>, chat history replaces the active side-panel view and groups chat rows by time period.</p>
+            <div class="design-reference-meta">
+              <strong>HTML</strong>
+              <div class="design-code-list">
+                <span class="design-code">chat-history-panel</span>
+                <span class="design-code">chat-search-display</span>
+                <span class="design-code">chat-list-section</span>
+                <span class="design-code">chat-list-item</span>
+              </div>
+            </div>
+            <div class="design-reference-meta">
+              <strong>CSS</strong>
+              <div class="design-code-list">
+                <span class="design-code">chat-list-heading</span>
+                <span class="design-code">chat-tag</span>
+                <span class="design-code">chat-item-title</span>
+                <span class="design-code">is-hidden</span>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="design-reference-card">
+          <div class="design-reference-visual">
+            <span class="design-label">Component</span>
+            <h3>CTA hierarchy</h3>
+            <div class="design-component-stage">
+              <div class="design-actual-actions">
+                <button type="button" class="icon-button" aria-label="Start a new chat">
+                  <span class="icon-bg"><img src="assets/new%20chat.svg" alt="" class="icon-img"></span>
+                </button>
+                <button type="button" class="home-task-action">+ Add to digital room</button>
+                <button type="button" class="switcher-row-button">Run meeting prep</button>
+                <button type="button" class="submit-button" aria-label="Submit">
+                  <img src="assets/submit%20chat%20arrow.svg" alt="">
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="design-reference-detail">
+            <h3>Icon, outline, and submit actions</h3>
+            <p>In <code>index.html</code>, icon buttons serve panel chrome, outline buttons appear in task and switcher rows, and submit actions sit in prompt composers.</p>
+            <div class="design-reference-meta">
+              <strong>HTML</strong>
+              <div class="design-code-list">
+                <span class="design-code">icon-button</span>
+                <span class="design-code">home-task-action</span>
+                <span class="design-code">switcher-row-button</span>
+                <span class="design-code">submit-button</span>
+              </div>
+            </div>
+            <div class="design-reference-meta">
+              <strong>CSS</strong>
+              <div class="design-code-list">
+                <span class="design-code">icon-bg</span>
+                <span class="design-code">--button-size</span>
+                <span class="design-code">home-task-action</span>
+                <span class="design-code">--accent-blue</span>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="design-reference-card">
+          <div class="design-reference-visual">
+            <span class="design-label">Pattern</span>
+            <h3>Switcher and search overlays</h3>
+            <div class="design-component-stage">
+              <div class="design-actual-switcher">
+                <div class="page-switcher-popover" role="dialog" aria-label="Page switcher" aria-hidden="false">
+                  <div class="page-switcher-nav">
+                    <img src="assets/page-switcher-logo.svg" alt="Highspot" class="page-switcher-logo">
+                    <div class="page-switcher-divider"></div>
+                    <div class="page-switcher-nav-items">
+                      <button type="button" class="switcher-nav-item is-selected" aria-current="page">
+                        <span class="switcher-nav-icon-slot">
+                          <img src="assets/page-switcher-icon-deals.svg" alt="" class="switcher-nav-icon">
+                        </span>
+                        <span>Deals</span>
+                      </button>
+                      <button type="button" class="switcher-nav-item">
+                        <span class="switcher-nav-icon-slot">
+                          <img src="assets/page-switcher-icon-automations.svg" alt="" class="switcher-nav-icon switcher-nav-icon-narrow">
+                        </span>
+                        <span>Automations</span>
+                      </button>
+                      <button type="button" class="switcher-nav-item">
+                        <span class="switcher-nav-icon-slot">
+                          <img src="assets/page-switcher-icon-knowledge.svg" alt="" class="switcher-nav-icon">
+                        </span>
+                        <span>Knowledge</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="page-switcher-content">
+                    <div class="switcher-content-header">
+                      <span>My Deals</span>
+                      <img src="assets/page-switcher-arrow.svg" alt="" class="switcher-content-arrow">
+                    </div>
+                    <div class="page-switcher-divider"></div>
+                    <div class="switcher-content-section">
+                      <h4>Your upcoming meetings</h4>
+                      <div class="switcher-content-row">
+                        <div class="switcher-thumb"><img src="assets/new%20chat.svg" alt=""></div>
+                        <div class="switcher-content-copy">
+                          <strong>AWS Weekly Sync</strong>
+                          <span>Host: Vanessa C.</span>
+                          <span>Today, 11:00 AM</span>
+                        </div>
+                        <button type="button" class="switcher-row-button">Run meeting prep</button>
+                      </div>
+                      <div class="switcher-content-row">
+                        <div class="switcher-thumb switcher-thumb-primary"><img src="assets/chat%20list.svg" alt=""></div>
+                        <div class="switcher-content-copy">
+                          <strong>Visa Inc stakeholder sync</strong>
+                          <span>Host: Hao L.</span>
+                          <span>Today, 3:00 PM</span>
+                        </div>
+                        <button type="button" class="switcher-row-button">Run meeting prep</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <section class="omnibox-panel" aria-label="Search preview">
+                  <div class="omnibox-search-row">
+                    <img src="assets/search.svg" alt="" class="omnibox-search-icon">
+                    <input type="search" class="omnibox-input" placeholder="Search deals, tasks, meetings..." aria-label="Search prototype items">
+                  </div>
+                </section>
+              </div>
+            </div>
+          </div>
+          <div class="design-reference-detail">
+            <h3>Transient navigation surfaces</h3>
+            <p>In <code>index.html</code>, the page switcher sits inside panel chrome and the omnibox sits at the app-container level as a modal overlay.</p>
+            <div class="design-reference-meta">
+              <strong>HTML</strong>
+              <div class="design-code-list">
+                <span class="design-code">page-switcher-popover</span>
+                <span class="design-code">page-switcher-nav</span>
+                <span class="design-code">page-switcher-content</span>
+                <span class="design-code">omnibox-overlay</span>
+              </div>
+            </div>
+            <div class="design-reference-meta">
+              <strong>CSS</strong>
+              <div class="design-code-list">
+                <span class="design-code">switcher-nav-item</span>
+                <span class="design-code">switcher-content-row</span>
+                <span class="design-code">omnibox-panel</span>
+                <span class="design-code">omnibox-backdrop</span>
+              </div>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+  </main>
+</body>
+</html>
