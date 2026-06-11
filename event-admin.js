@@ -431,10 +431,14 @@
     const node = getNodeById(nodeId);
     if (!node) return;
     const point = getCanvasPointFromEvent(event);
+    const origin = getGraphOrigin(state.draft);
+    const display = toDisplayCoord(node.x, node.y, state.draft);
     state.nodeDrag = {
       nodeId: nodeId,
-      offsetX: point.x - (node.x || 0),
-      offsetY: point.y - (node.y || 0)
+      offsetX: point.x - display.x,
+      offsetY: point.y - display.y,
+      originX: origin.x,
+      originY: origin.y
     };
   }
 
@@ -443,14 +447,14 @@
     const node = getNodeById(state.nodeDrag.nodeId);
     if (!node) return;
     const point = getCanvasPointFromEvent(event);
-    node.x = Math.max(8, point.x - state.nodeDrag.offsetX);
-    node.y = Math.max(8, point.y - state.nodeDrag.offsetY);
+    node.x = point.x - state.nodeDrag.offsetX + state.nodeDrag.originX;
+    node.y = point.y - state.nodeDrag.offsetY + state.nodeDrag.originY;
     if (node.type === NODE_TYPES.SESSION) layoutSessionGroup(state.draft, node.id);
-    updateGraphBounds(state.draft);
+    const display = toDisplayCoord(node.x, node.y, state.draft);
     const nodeEl = DOM.canvas.querySelector(`[data-node-id="${node.id}"]`);
     if (nodeEl) {
-      nodeEl.style.left = `${node.x}px`;
-      nodeEl.style.top = `${node.y}px`;
+      nodeEl.style.left = `${display.x}px`;
+      nodeEl.style.top = `${display.y}px`;
     }
     if (node.type === NODE_TYPES.SESSION || node.parentSessionId) renderCanvas();
     drawCanvasEdges();
@@ -459,7 +463,9 @@
   function finishNodeDrag() {
     if (!state.nodeDrag) return;
     state.nodeDrag = null;
+    updateGraphBounds(state.draft);
     refreshEdgePorts(state.draft);
+    renderCanvas();
     markDirty();
   }
 
@@ -629,17 +635,43 @@
     updateGraphBounds(draft);
   }
 
+  function getGraphOrigin(draft) {
+    const target = draft || state.draft;
+    if (!target || !target.meta) return { x: 0, y: 0 };
+    return {
+      x: typeof target.meta.graphOriginX === 'number' ? target.meta.graphOriginX : 0,
+      y: typeof target.meta.graphOriginY === 'number' ? target.meta.graphOriginY : 0
+    };
+  }
+
+  function toDisplayCoord(x, y, draft) {
+    const origin = getGraphOrigin(draft);
+    return {
+      x: (x || 0) - origin.x,
+      y: (y || 0) - origin.y
+    };
+  }
+
   function updateGraphBounds(draft) {
+    let minX = 0;
+    let minY = 0;
     let maxX = 640;
     let maxY = 480;
+    const padding = 48;
     draft.nodes.forEach(function (node) {
       const width = isSessionChildType(node.type) ? CANVAS_CHILD_WIDTH : CANVAS_NODE_WIDTH;
       const height = isSessionChildType(node.type) ? CANVAS_CHILD_HEIGHT : CANVAS_NODE_HEIGHT;
-      maxX = Math.max(maxX, (node.x || 0) + width + 48);
-      maxY = Math.max(maxY, (node.y || 0) + height + 48);
+      const x = node.x || 0;
+      const y = node.y || 0;
+      minX = Math.min(minX, x - padding);
+      minY = Math.min(minY, y - padding);
+      maxX = Math.max(maxX, x + width + padding);
+      maxY = Math.max(maxY, y + height + padding);
     });
-    draft.meta.graphWidth = maxX;
-    draft.meta.graphHeight = maxY;
+    draft.meta.graphOriginX = minX;
+    draft.meta.graphOriginY = minY;
+    draft.meta.graphWidth = maxX - minX;
+    draft.meta.graphHeight = maxY - minY;
   }
 
   function ensureSessionBranch(draft, sessionId) {
@@ -857,8 +889,9 @@
 
   function getNodePortPoint(node, side) {
     const dims = getNodeDimensions(node);
-    const x = node.x || 0;
-    const y = node.y || 0;
+    const display = toDisplayCoord(node.x, node.y);
+    const x = display.x;
+    const y = display.y;
     const port = normalizePortSide(side) || DEFAULT_FROM_PORT;
 
     if (port === 'top') return { x: x + (dims.width / 2), y: y, side: port };
@@ -1104,8 +1137,9 @@
     };
 
     if (dropPoint && !isSessionChildType(type)) {
-      newNode.x = Math.max(16, dropPoint.x - (CANVAS_NODE_WIDTH / 2));
-      newNode.y = Math.max(16, dropPoint.y - 24);
+      const origin = getGraphOrigin(draft);
+      newNode.x = dropPoint.x - (CANVAS_NODE_WIDTH / 2) + origin.x;
+      newNode.y = dropPoint.y - 24 + origin.y;
     }
 
     draft.nodes.push(newNode);
@@ -1508,7 +1542,8 @@
     const errorClass = nodeShowCanvasError(node) ? ' event-canvas-node-has-error' : '';
     const errorBadge = nodeShowCanvasError(node) ? '<span class="event-canvas-node-error-badge" aria-label="Needs attention">!</span>' : '';
 
-    return `<div class="event-canvas-node${groupClass}${errorClass}${isActive ? ' is-active' : ''}" data-node-id="${node.id}" role="button" tabindex="0" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${width}px;min-height:${height}px">${renderCanvasPorts(node.id)}${removeButton}${errorBadge}<span class="event-canvas-node-copy"><span class="event-canvas-node-head"><span class="event-canvas-node-title">${escapeHtml(nodeLabel)}</span><span class="event-status ${statusClass(status)}">${escapeHtml(status)}</span></span></span></div>`;
+    const display = toDisplayCoord(node.x, node.y);
+    return `<div class="event-canvas-node${groupClass}${errorClass}${isActive ? ' is-active' : ''}" data-node-id="${node.id}" role="button" tabindex="0" style="left:${display.x}px;top:${display.y}px;width:${width}px;min-height:${height}px">${renderCanvasPorts(node.id)}${removeButton}${errorBadge}<span class="event-canvas-node-copy"><span class="event-canvas-node-head"><span class="event-canvas-node-title">${escapeHtml(nodeLabel)}</span><span class="event-status ${statusClass(status)}">${escapeHtml(status)}</span></span></span></div>`;
   }
 
   function renderSessionGroupsMarkup() {
@@ -1516,12 +1551,13 @@
       const sessionNode = state.draft.nodes.find(function (node) { return node.id === sessionId; });
       if (!sessionNode) return '';
       const childNodes = getSessionChildNodes(state.draft, sessionId);
+      const origin = getGraphOrigin(state.draft);
       const xs = [sessionNode.x || 0].concat(childNodes.map(function (node) { return node.x || 0; }));
       const ys = [sessionNode.y || 0].concat(childNodes.map(function (node) { return node.y || 0; }));
-      const minX = Math.min.apply(null, xs) - 16;
-      const minY = Math.min.apply(null, ys) - 16;
-      const maxX = Math.max.apply(null, xs) + CANVAS_NODE_WIDTH + 16;
-      const maxY = Math.max.apply(null, ys) + (childNodes.length * 72) + 16;
+      const minX = Math.min.apply(null, xs) - 16 - origin.x;
+      const minY = Math.min.apply(null, ys) - 16 - origin.y;
+      const maxX = Math.max.apply(null, xs) + CANVAS_NODE_WIDTH + 16 - origin.x;
+      const maxY = Math.max.apply(null, ys) + (childNodes.length * 72) + 16 - origin.y;
       return `<div class="event-canvas-session-group" style="left:${minX}px;top:${minY}px;width:${maxX - minX}px;height:${maxY - minY}px" aria-hidden="true"></div>`;
     }).join('');
   }
