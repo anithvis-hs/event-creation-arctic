@@ -10,6 +10,7 @@
   const DEFAULT_FROM_PORT = 'bottom';
   const DEFAULT_TO_PORT = 'top';
   const PORT_SNAP_RADIUS = 20;
+  const NODE_DRAG_THRESHOLD = 4;
   const STATUS = {
     NOT_STARTED: 'Not started',
     IN_PROGRESS: 'In progress',
@@ -64,8 +65,12 @@
     openButton: document.getElementById('new-event-button'),
     sampleButton: document.getElementById('load-sample-event-button'),
     workspaceSaveButton: document.getElementById('workspace-save-button'),
+    workspaceReviewButton: document.getElementById('workspace-review-button'),
+    workspacePublishButton: document.getElementById('workspace-publish-button'),
     closeButton: document.getElementById('event-admin-close-button'),
     saveButton: document.getElementById('event-admin-save-button'),
+    reviewButton: document.getElementById('event-admin-review-button'),
+    publishButton: document.getElementById('event-admin-publish-button'),
     startBlankButton: document.getElementById('event-start-blank-button'),
     templateGallery: document.getElementById('event-template-gallery'),
     templateCards: document.getElementById('event-template-cards'),
@@ -81,7 +86,18 @@
     zoomOutButton: document.getElementById('event-canvas-zoom-out'),
     zoomResetButton: document.getElementById('event-canvas-zoom-reset'),
     zoomLabel: document.getElementById('event-canvas-zoom-label'),
-    fitGraphButton: document.getElementById('event-canvas-fit-graph')
+    fitGraphButton: document.getElementById('event-canvas-fit-graph'),
+    publishReviewModal: document.getElementById('event-publish-review-modal'),
+    publishBlockersList: document.getElementById('event-publish-blockers-list'),
+    publishWarningsList: document.getElementById('event-publish-warnings-list'),
+    publishBlockersEmpty: document.getElementById('event-publish-blockers-empty'),
+    publishWarningsEmpty: document.getElementById('event-publish-warnings-empty'),
+    publishAckWrap: document.getElementById('event-publish-ack-wrap'),
+    publishAckCheckbox: document.getElementById('event-publish-ack-checkbox'),
+    publishAckNoteWrap: document.getElementById('event-publish-ack-note-wrap'),
+    publishAckNote: document.getElementById('event-publish-ack-note'),
+    publishSubmitButton: document.getElementById('event-publish-submit'),
+    publishSuccessChip: document.getElementById('event-publish-success-chip')
   };
 
   if (!DOM.palette || !DOM.canvas || !DOM.form) return;
@@ -150,7 +166,12 @@
       meta: {
         lastSavedAt: now,
         isDirty: false,
-        templateChosen: false
+        templateChosen: false,
+        validationAttempted: false,
+        publishedAt: null,
+        publishStatus: 'draft',
+        warningsAcknowledged: false,
+        warningsAckNote: ''
       }
     };
   }
@@ -427,6 +448,29 @@
     return state.draft.nodes.find(function (node) { return node.id === nodeId; });
   }
 
+  function selectCanvasNode(nodeId) {
+    state.selectedNodeId = nodeId;
+    state.selectedEdgeKey = null;
+    clearAlert();
+    renderAll();
+  }
+
+  function updateNodeElementPosition(node) {
+    const display = toDisplayCoord(node.x, node.y, state.draft);
+    const nodeEl = DOM.canvas.querySelector(`[data-node-id="${node.id}"]`);
+    if (nodeEl) {
+      nodeEl.style.left = `${display.x}px`;
+      nodeEl.style.top = `${display.y}px`;
+    }
+  }
+
+  function syncGraphContainerSize() {
+    const graph = DOM.canvas.querySelector('#event-canvas-graph');
+    if (!graph || !state.draft) return;
+    graph.style.width = `${state.draft.meta.graphWidth || 960}px`;
+    graph.style.height = `${state.draft.meta.graphHeight || 720}px`;
+  }
+
   function startNodeDrag(nodeId, event) {
     const node = getNodeById(nodeId);
     if (!node) return;
@@ -438,7 +482,10 @@
       offsetX: point.x - display.x,
       offsetY: point.y - display.y,
       originX: origin.x,
-      originY: origin.y
+      originY: origin.y,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      isDragging: false
     };
   }
 
@@ -446,26 +493,45 @@
     if (!state.nodeDrag) return;
     const node = getNodeById(state.nodeDrag.nodeId);
     if (!node) return;
+
+    if (!state.nodeDrag.isDragging) {
+      const dx = event.clientX - state.nodeDrag.startClientX;
+      const dy = event.clientY - state.nodeDrag.startClientY;
+      if (Math.hypot(dx, dy) < NODE_DRAG_THRESHOLD) return;
+      state.nodeDrag.isDragging = true;
+    }
+
     const point = getCanvasPointFromEvent(event);
     node.x = point.x - state.nodeDrag.offsetX + state.nodeDrag.originX;
     node.y = point.y - state.nodeDrag.offsetY + state.nodeDrag.originY;
     if (node.type === NODE_TYPES.SESSION) layoutSessionGroup(state.draft, node.id);
-    const display = toDisplayCoord(node.x, node.y, state.draft);
-    const nodeEl = DOM.canvas.querySelector(`[data-node-id="${node.id}"]`);
-    if (nodeEl) {
-      nodeEl.style.left = `${display.x}px`;
-      nodeEl.style.top = `${display.y}px`;
-    }
-    if (node.type === NODE_TYPES.SESSION || node.parentSessionId) renderCanvas();
+    updateNodeElementPosition(node);
     drawCanvasEdges();
   }
 
   function finishNodeDrag() {
     if (!state.nodeDrag) return;
+    const nodeId = state.nodeDrag.nodeId;
+    const didDrag = state.nodeDrag.isDragging;
     state.nodeDrag = null;
+
+    if (!didDrag) {
+      selectCanvasNode(nodeId);
+      return;
+    }
+
+    const prevOrigin = getGraphOrigin(state.draft);
     updateGraphBounds(state.draft);
     refreshEdgePorts(state.draft);
-    renderCanvas();
+    const nextOrigin = getGraphOrigin(state.draft);
+    const originChanged = prevOrigin.x !== nextOrigin.x || prevOrigin.y !== nextOrigin.y;
+
+    if (originChanged) {
+      renderCanvas();
+    } else {
+      syncGraphContainerSize();
+      drawCanvasEdges();
+    }
     markDirty();
   }
 
@@ -543,12 +609,19 @@
 
   function markDirty() {
     if (!state.draft) return;
+    const wasPublished = state.draft.meta.publishStatus === 'published';
     state.draft.meta.isDirty = true;
+    state.draft.meta.publishStatus = 'draft';
+    state.draft.meta.publishedAt = null;
+    state.draft.meta.warningsAcknowledged = false;
+    state.draft.meta.warningsAckNote = '';
     if (state.draft.meta) {
       state.draft.meta.removedAutoEdges = state.removedAutoEdges;
     }
     saveDraft(false);
     renderSummary();
+    updateHeaderButtons();
+    if (wasPublished) showToast('Changes require a new review before publishing.', 4000);
   }
 
   function escapeHtml(value) {
@@ -743,6 +816,12 @@
     if (!draft.sessionMap) draft.sessionMap = {};
     if (!draft.conflicts) draft.conflicts = [];
     if (!draft.publishChecklist) draft.publishChecklist = { blockers: [], warnings: [] };
+    if (!draft.meta) draft.meta = {};
+    if (typeof draft.meta.validationAttempted !== 'boolean') draft.meta.validationAttempted = false;
+    if (typeof draft.meta.publishedAt !== 'number') draft.meta.publishedAt = null;
+    if (!draft.meta.publishStatus) draft.meta.publishStatus = 'draft';
+    if (typeof draft.meta.warningsAcknowledged !== 'boolean') draft.meta.warningsAcknowledged = false;
+    if (typeof draft.meta.warningsAckNote !== 'string') draft.meta.warningsAckNote = '';
 
     draft.nodes.forEach(function (node) {
       if (typeof node.x !== 'number' || typeof node.y !== 'number') {
@@ -1412,9 +1491,15 @@
 
     Object.keys(titles).forEach(function (title) {
       if (titles[title].length > 1) {
+        const sessionId = titles[title][0];
+        const basicsNode = getSessionChildNodes(draft, sessionId).find(function (node) {
+          return node.type === NODE_TYPES.SESSION_BASICS;
+        });
         conflicts.push({
           type: 'warning',
-          message: `Duplicate session title "${title}" appears ${titles[title].length} times.`
+          message: `Duplicate session title "${title}" appears ${titles[title].length} times.`,
+          nodeId: basicsNode ? basicsNode.id : null,
+          sessionId: sessionId
         });
       }
     });
@@ -1434,17 +1519,27 @@
 
         if (leftVenue.venueMode === 'physical' && rightVenue.venueMode === 'physical' &&
             hasText(leftVenue.location) && leftVenue.location === rightVenue.location) {
+          const venueNode = getSessionChildNodes(draft, leftId).find(function (node) {
+            return node.type === NODE_TYPES.SESSION_VENUE;
+          });
           conflicts.push({
             type: 'error',
-            message: `Venue collision: "${leftVenue.location}" is double-booked.`
+            message: `Venue collision: "${leftVenue.location}" is double-booked.`,
+            nodeId: venueNode ? venueNode.id : null,
+            sessionId: leftId
           });
         }
 
         leftInstructors.forEach(function (leftEntry) {
           if (rightInstructors.indexOf(leftEntry) > -1) {
+            const instructorNode = getSessionChildNodes(draft, leftId).find(function (node) {
+              return node.type === NODE_TYPES.SESSION_INSTRUCTORS;
+            });
             conflicts.push({
               type: 'error',
-              message: `Instructor "${leftEntry}" is double-booked across overlapping sessions.`
+              message: `Instructor "${leftEntry}" is double-booked across overlapping sessions.`,
+              nodeId: instructorNode ? instructorNode.id : null,
+              sessionId: leftId
             });
           }
         });
@@ -1455,13 +1550,34 @@
     return conflicts;
   }
 
+  function makeChecklistItem(severity, message, nodeId, sessionId) {
+    return {
+      severity: severity,
+      message: message,
+      nodeId: nodeId || null,
+      sessionId: sessionId || null
+    };
+  }
+
+  function normalizeChecklistItem(item, severity) {
+    if (item && typeof item === 'object' && item.message) {
+      return {
+        severity: item.severity || severity,
+        message: item.message,
+        nodeId: item.nodeId || null,
+        sessionId: item.sessionId || null
+      };
+    }
+    return makeChecklistItem(severity, String(item || ''), null, null);
+  }
+
   function computePublishChecklist(draft) {
     const blockers = [];
     const warnings = [];
 
     draft.nodes.filter(function (node) { return node.required && !isSessionChildType(node.type); }).forEach(function (node) {
       validateNode(node).errors.forEach(function (error) {
-        blockers.push(`${node.label}: ${error}`);
+        blockers.push(makeChecklistItem('blocker', `${node.label}: ${error}`, node.id, null));
       });
     });
 
@@ -1470,14 +1586,25 @@
       getSessionChildNodes(draft, sessionId).forEach(function (child) {
         if (!child.required) return;
         validateNode(child).errors.forEach(function (error) {
-          blockers.push(`${sessionNode.label} / ${child.label}: ${error}`);
+          blockers.push(makeChecklistItem(
+            'blocker',
+            `${sessionNode ? sessionNode.label : 'Session'} / ${child.label}: ${error}`,
+            child.id,
+            sessionId
+          ));
         });
       });
     });
 
     computeConflicts(draft).forEach(function (conflict) {
-      if (conflict.type === 'error') blockers.push(conflict.message);
-      else warnings.push(conflict.message);
+      const item = makeChecklistItem(
+        conflict.type === 'error' ? 'blocker' : 'warning',
+        conflict.message,
+        conflict.nodeId,
+        conflict.sessionId
+      );
+      if (conflict.type === 'error') blockers.push(item);
+      else warnings.push(item);
     });
 
     draft.publishChecklist = { blockers: blockers, warnings: warnings };
@@ -1649,8 +1776,38 @@
     const template = state.draft.meta.templateId ? getTemplateById(state.draft.meta.templateId) : null;
     const templateLabel = template ? `${template.label} template` : 'Blank canvas';
     const syncedAt = savedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const validationLabel = state.draft.meta.isDirty ? 'Not validated yet' : 'Validated and publish-ready';
-    DOM.meta.textContent = `${templateLabel} · Synced locally at ${syncedAt} · ${validationLabel}.`;
+    let statusLabel = `Draft saved at ${syncedAt}`;
+    if (state.draft.meta.publishStatus === 'published' && state.draft.meta.publishedAt) {
+      const publishedAt = new Date(state.draft.meta.publishedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      statusLabel = `Published at ${publishedAt}`;
+    } else if (state.draft.meta.validationAttempted) {
+      const checklist = state.draft.publishChecklist || { blockers: [], warnings: [] };
+      statusLabel = `${checklist.blockers.length} blocker(s) · ${checklist.warnings.length} warning(s)`;
+    } else if (state.draft.meta.isDirty) {
+      statusLabel = 'Unsaved changes';
+    }
+    DOM.meta.textContent = `${templateLabel} · ${statusLabel}.`;
+    updateHeaderButtons();
+    updatePublishSuccessChip();
+  }
+
+  function updateHeaderButtons() {
+    const isPublished = state.draft && state.draft.meta.publishStatus === 'published';
+    [DOM.workspacePublishButton, DOM.publishButton].forEach(function (button) {
+      if (!button) return;
+      button.disabled = isPublished;
+      button.setAttribute('aria-disabled', isPublished ? 'true' : 'false');
+    });
+  }
+
+  function updatePublishSuccessChip() {
+    if (!DOM.publishSuccessChip || !state.draft) return;
+    const isPublished = state.draft.meta.publishStatus === 'published';
+    DOM.publishSuccessChip.classList.toggle('is-hidden', !isPublished);
+    if (isPublished && state.draft.meta.publishedAt) {
+      const publishedAt = new Date(state.draft.meta.publishedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      DOM.publishSuccessChip.textContent = `Published at ${publishedAt}`;
+    }
   }
 
   function showTemplateGallery() {
@@ -2152,44 +2309,100 @@
     state.draft.payloadByNodeId[publishNode.id].status = blockers.length ? 'pending' : 'ready';
   }
 
-  function showPostSaveSummary() {
-    if (!isEmbeddedWorkspace) return;
-    const basicsNode = state.draft.nodes.find(function (node) { return node.type === NODE_TYPES.BASICS; });
-    const basicsPayload = basicsNode ? (state.draft.payloadByNodeId[basicsNode.id] || {}) : {};
-    const summaryHost = document.getElementById('workspace-event-saved-summary');
-    if (!summaryHost) return;
-
-    summaryHost.innerHTML = `
-      <h2>Event draft validated</h2>
-      <p class="event-helper">${escapeHtml(basicsPayload.title || 'Untitled event')} · ${state.draft.sessions.length} session branch(es) · Required nodes complete.</p>
-      <ul>
-        <li>Template: ${escapeHtml(state.draft.meta.templateId || 'Blank canvas')}</li>
-        <li>Saved at ${new Date(state.draft.meta.lastSavedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</li>
-      </ul>
-      <button type="button" class="home-task-action" id="workspace-return-to-event-button">Return to event editor</button>
-    `;
-    summaryHost.classList.remove('is-hidden');
-
-    const returnButton = document.getElementById('workspace-return-to-event-button');
-    if (returnButton) {
-      returnButton.addEventListener('click', function () {
-        summaryHost.classList.add('is-hidden');
-        if (window.openEventWorkspace) window.openEventWorkspace({ skipConfirm: true });
-      }, { once: true });
-    }
-
-    if (window.closeEventWorkspace) window.closeEventWorkspace({ preserveView: true });
+  function jumpToChecklistItem(nodeId) {
+    if (!nodeId) return;
+    state.selectedNodeId = nodeId;
+    state.attemptedNodeIds[nodeId] = true;
+    hidePublishReviewModal();
+    clearAlert();
+    renderAll();
   }
 
-  function validateAndSave() {
-    if (!state.isInitialized || !state.draft) return;
+  function showPublishReviewModal() {
+    if (!DOM.publishReviewModal) return;
+    DOM.publishReviewModal.classList.remove('is-hidden');
+  }
+
+  function hidePublishReviewModal() {
+    if (!DOM.publishReviewModal) return;
+    DOM.publishReviewModal.classList.add('is-hidden');
+  }
+
+  function renderPublishReviewModal(checklist) {
+    if (!DOM.publishReviewModal || !checklist) return;
+
+    const blockers = (checklist.blockers || []).map(function (item) {
+      return normalizeChecklistItem(item, 'blocker');
+    });
+    const warnings = (checklist.warnings || []).map(function (item) {
+      return normalizeChecklistItem(item, 'warning');
+    });
+
+    if (DOM.publishBlockersList) {
+      DOM.publishBlockersList.innerHTML = blockers.length
+        ? blockers.map(function (item, index) {
+          const fixButton = item.nodeId
+            ? `<button type="button" class="event-link-button" data-action="fix-checklist-item" data-node-id="${escapeHtml(item.nodeId)}">Fix</button>`
+            : '';
+          return `<li class="event-publish-review-item is-blocker"><span>${escapeHtml(item.message)}</span>${fixButton}</li>`;
+        }).join('')
+        : '';
+    }
+    if (DOM.publishBlockersEmpty) {
+      DOM.publishBlockersEmpty.classList.toggle('is-hidden', blockers.length > 0);
+    }
+
+    if (DOM.publishWarningsList) {
+      DOM.publishWarningsList.innerHTML = warnings.length
+        ? warnings.map(function (item) {
+          const fixButton = item.nodeId
+            ? `<button type="button" class="event-link-button" data-action="fix-checklist-item" data-node-id="${escapeHtml(item.nodeId)}">Fix</button>`
+            : '';
+          return `<li class="event-publish-review-item is-warning"><span>${escapeHtml(item.message)}</span>${fixButton}</li>`;
+        }).join('')
+        : '';
+    }
+    if (DOM.publishWarningsEmpty) {
+      DOM.publishWarningsEmpty.classList.toggle('is-hidden', warnings.length > 0);
+    }
+
+    const showAck = warnings.length > 0;
+    if (DOM.publishAckWrap) DOM.publishAckWrap.classList.toggle('is-hidden', !showAck);
+    if (DOM.publishAckNoteWrap) DOM.publishAckNoteWrap.classList.toggle('is-hidden', !showAck);
+    if (DOM.publishAckCheckbox) {
+      DOM.publishAckCheckbox.checked = Boolean(state.draft.meta.warningsAcknowledged);
+    }
+    if (DOM.publishAckNote) {
+      DOM.publishAckNote.value = state.draft.meta.warningsAckNote || '';
+    }
+
+    const canPublish = blockers.length === 0 && (!warnings.length || state.draft.meta.warningsAcknowledged);
+    if (DOM.publishSubmitButton) {
+      DOM.publishSubmitButton.disabled = !canPublish;
+    }
+  }
+
+  function syncPublishAckFromModal() {
+    if (!state.draft) return;
+    if (DOM.publishAckCheckbox) {
+      state.draft.meta.warningsAcknowledged = DOM.publishAckCheckbox.checked;
+    }
+    if (DOM.publishAckNote) {
+      state.draft.meta.warningsAckNote = DOM.publishAckNote.value.trim();
+    }
+  }
+
+  function runEventValidation() {
+    if (!state.draft) return { brokenNode: null, checklist: null, noRequiredNodes: true };
+
     state.draft.meta.validationAttempted = true;
+
     const requiredNodes = state.draft.nodes.filter(function (node) {
       return node.required && !isSessionChildType(node.type);
     });
+
     if (!requiredNodes.length) {
-      setAlert('Add required nodes to canvas first (Basics, Registration, Sessions Container).', true);
-      return;
+      return { brokenNode: null, checklist: computePublishChecklist(state.draft), noRequiredNodes: true };
     }
 
     let brokenNode = null;
@@ -2207,17 +2420,20 @@
     });
 
     const checklist = computePublishChecklist(state.draft);
-    renderAll();
-
-    if (brokenNode) {
-      state.selectedNodeId = brokenNode.id;
-      renderAll();
-      setAlert(`Save blocked: ${brokenNode.label} has required fields missing.`, true);
-      return;
+    if (!brokenNode && checklist.blockers.length) {
+      const firstBlocker = normalizeChecklistItem(checklist.blockers[0], 'blocker');
+      if (firstBlocker.nodeId) {
+        brokenNode = getNodeById(firstBlocker.nodeId);
+      }
     }
 
-    if (checklist.blockers.length) {
-      setAlert(`Save blocked: ${checklist.blockers[0]}`, true);
+    return { brokenNode: brokenNode, checklist: checklist, noRequiredNodes: false };
+  }
+
+  function saveDraftLocal() {
+    if (!state.isInitialized || !state.draft) return;
+    if (!state.draft.nodes.length) {
+      setAlert('Add nodes to the canvas before saving.', true);
       return;
     }
 
@@ -2225,13 +2441,152 @@
     saveDraft(false);
     renderSummary();
     clearAlert();
+    showToast('Draft saved locally.', 4000);
+  }
 
-    const warningCount = checklist.warnings.length;
-    const toastMessage = warningCount
-      ? `Draft validated with ${warningCount} warning${warningCount > 1 ? 's' : ''}.`
-      : 'Draft validated. Event is publish-ready.';
-    showToast(toastMessage, 5000);
-    showPostSaveSummary();
+  function openPublishReview() {
+    if (!state.isInitialized || !state.draft) return;
+
+    const result = runEventValidation();
+    if (result.noRequiredNodes) {
+      setAlert('Add required nodes to canvas first (Basics, Registration, Sessions Container).', true);
+      return;
+    }
+
+    state.draft.meta.publishStatus = 'reviewed';
+    renderAll();
+    renderPublishReviewModal(result.checklist);
+    showPublishReviewModal();
+    clearAlert();
+
+    if (result.brokenNode) {
+      setAlert(`Review found issues in ${result.brokenNode.label}. Fix blockers before publishing.`, true);
+    }
+  }
+
+  function rerunPublishReview() {
+    syncPublishAckFromModal();
+    const result = runEventValidation();
+    renderAll();
+    renderPublishReviewModal(result.checklist);
+    showPublishReviewModal();
+  }
+
+  function publishEvent() {
+    if (!state.isInitialized || !state.draft) return;
+    if (state.draft.meta.publishStatus === 'published') return;
+
+    syncPublishAckFromModal();
+    const result = runEventValidation();
+    const checklist = result.checklist;
+    renderPublishReviewModal(checklist);
+
+    if (checklist.blockers.length) {
+      showPublishReviewModal();
+      setAlert(`Publish blocked: ${normalizeChecklistItem(checklist.blockers[0], 'blocker').message}`, true);
+      renderAll();
+      return;
+    }
+
+    if (checklist.warnings.length && !state.draft.meta.warningsAcknowledged) {
+      showPublishReviewModal();
+      setAlert('Acknowledge warnings before publishing.', true);
+      renderAll();
+      return;
+    }
+
+    state.draft.meta.publishStatus = 'published';
+    state.draft.meta.publishedAt = Date.now();
+    state.draft.meta.isDirty = false;
+    saveDraft(false);
+    hidePublishReviewModal();
+    renderAll();
+    clearAlert();
+    showToast('Event published.', 5000);
+    showPublishSuccessSummary();
+  }
+
+  function publishShortcut() {
+    if (!state.isInitialized || !state.draft) return;
+    if (state.draft.meta.publishStatus === 'published') return;
+
+    const modalOpen = DOM.publishReviewModal && !DOM.publishReviewModal.classList.contains('is-hidden');
+    if (modalOpen) {
+      publishEvent();
+      return;
+    }
+
+    syncPublishAckFromModal();
+    const result = runEventValidation();
+    const checklist = result.checklist;
+
+    if (result.noRequiredNodes) {
+      setAlert('Add required nodes to canvas first (Basics, Registration, Sessions Container).', true);
+      return;
+    }
+
+    if (!checklist.blockers.length && (!checklist.warnings.length || state.draft.meta.warningsAcknowledged)) {
+      publishEvent();
+      return;
+    }
+
+    openPublishReview();
+  }
+
+  function showPublishSuccessSummary() {
+    const basicsNode = state.draft.nodes.find(function (node) { return node.type === NODE_TYPES.BASICS; });
+    const basicsPayload = basicsNode ? (state.draft.payloadByNodeId[basicsNode.id] || {}) : {};
+    const publishedAt = state.draft.meta.publishedAt
+      ? new Date(state.draft.meta.publishedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : '';
+    const warningNote = state.draft.meta.warningsAckNote
+      ? `<li>Warnings acknowledged: ${escapeHtml(state.draft.meta.warningsAckNote)}</li>`
+      : '';
+
+    if (isEmbeddedWorkspace) {
+      const summaryHost = document.getElementById('workspace-event-saved-summary');
+      if (!summaryHost) return;
+
+      summaryHost.innerHTML = `
+        <h2>Event published</h2>
+        <p class="event-helper">${escapeHtml(basicsPayload.title || 'Untitled event')} · ${state.draft.sessions.length} session branch(es) · Live in prototype.</p>
+        <ul>
+          <li>Template: ${escapeHtml(state.draft.meta.templateId || 'Blank canvas')}</li>
+          <li>Published at ${publishedAt}</li>
+          ${warningNote}
+        </ul>
+        <button type="button" class="home-task-action" id="workspace-return-to-event-button">Return to event editor</button>
+      `;
+      summaryHost.classList.remove('is-hidden');
+
+      const returnButton = document.getElementById('workspace-return-to-event-button');
+      if (returnButton) {
+        returnButton.addEventListener('click', function () {
+          summaryHost.classList.add('is-hidden');
+          if (window.openEventWorkspace) window.openEventWorkspace({ skipConfirm: true });
+        }, { once: true });
+      }
+
+      if (window.closeEventWorkspace) window.closeEventWorkspace({ preserveView: true });
+      return;
+    }
+
+    const summaryHost = document.getElementById('event-publish-success-summary');
+    if (!summaryHost) return;
+
+    summaryHost.innerHTML = `
+      <h2>Event published</h2>
+      <p class="event-helper">${escapeHtml(basicsPayload.title || 'Untitled event')} · ${state.draft.sessions.length} session branch(es) · Prototype publish complete.</p>
+      <ul>
+        <li>Published at ${publishedAt}</li>
+        ${warningNote}
+      </ul>
+    `;
+    summaryHost.classList.remove('is-hidden');
+  }
+
+  function validateAndSave() {
+    saveDraftLocal();
   }
 
   function loadDraft(draft) {
@@ -2254,6 +2609,11 @@
     clearToast();
     state.isInitialized = true;
     computeConflicts(draft);
+    hidePublishReviewModal();
+    const publishSummary = document.getElementById('event-publish-success-summary');
+    if (publishSummary) publishSummary.classList.add('is-hidden');
+    const workspaceSummary = document.getElementById('workspace-event-saved-summary');
+    if (workspaceSummary) workspaceSummary.classList.add('is-hidden');
     renderAll();
   }
 
@@ -2321,12 +2681,48 @@
   });
 
   DOM.closeButton && DOM.closeButton.addEventListener('click', resetCurrentDraft);
-  DOM.saveButton && DOM.saveButton.addEventListener('click', function () {
-    validateAndSave();
-  });
-  DOM.workspaceSaveButton && DOM.workspaceSaveButton.addEventListener('click', function () {
-    validateAndSave();
-  });
+  DOM.saveButton && DOM.saveButton.addEventListener('click', saveDraftLocal);
+  DOM.workspaceSaveButton && DOM.workspaceSaveButton.addEventListener('click', saveDraftLocal);
+  DOM.reviewButton && DOM.reviewButton.addEventListener('click', openPublishReview);
+  DOM.workspaceReviewButton && DOM.workspaceReviewButton.addEventListener('click', openPublishReview);
+  DOM.publishButton && DOM.publishButton.addEventListener('click', publishShortcut);
+  DOM.workspacePublishButton && DOM.workspacePublishButton.addEventListener('click', publishShortcut);
+
+  if (DOM.publishReviewModal) {
+    DOM.publishReviewModal.addEventListener('click', function (event) {
+      const action = event.target.closest('[data-action]');
+      if (!action) return;
+      if (action.dataset.action === 'close-publish-review') {
+        hidePublishReviewModal();
+        return;
+      }
+      if (action.dataset.action === 'rerun-publish-review') {
+        rerunPublishReview();
+        return;
+      }
+      if (action.dataset.action === 'publish-event') {
+        publishEvent();
+        return;
+      }
+      if (action.dataset.action === 'fix-checklist-item') {
+        jumpToChecklistItem(action.dataset.nodeId);
+      }
+    });
+  }
+
+  if (DOM.publishAckCheckbox) {
+    DOM.publishAckCheckbox.addEventListener('change', function () {
+      syncPublishAckFromModal();
+      const checklist = computePublishChecklist(state.draft);
+      renderPublishReviewModal(checklist);
+    });
+  }
+
+  if (DOM.publishAckNote) {
+    DOM.publishAckNote.addEventListener('input', function () {
+      syncPublishAckFromModal();
+    });
+  }
 
   DOM.startBlankButton && DOM.startBlankButton.addEventListener('click', startBlankFromGallery);
 
@@ -2405,7 +2801,7 @@
 
   DOM.canvas.addEventListener('mouseup', handleCanvasMouseUp);
   document.addEventListener('mouseup', function (event) {
-    if (!state.edgeDrag) return;
+    if (!state.nodeDrag && !state.edgeDrag) return;
     if (DOM.canvas.contains(event.target)) return;
     handleCanvasMouseUp(event);
   });
@@ -2414,6 +2810,12 @@
     if (state.nodeDrag) moveNodeDrag(event);
     if (state.edgeDrag) moveEdgeDrag(event);
     if (state.panDrag) movePanDrag(event);
+  });
+
+  document.addEventListener('mousemove', function (event) {
+    if (!state.nodeDrag || !state.nodeDrag.isDragging) return;
+    if (DOM.canvas.contains(event.target)) return;
+    moveNodeDrag(event);
   });
 
   DOM.canvas.addEventListener('wheel', function (event) {
@@ -2453,13 +2855,7 @@
     const node = event.target.closest('.event-canvas-node[data-node-id]');
     if (!node) {
       state.selectedEdgeKey = null;
-      return;
     }
-
-    state.selectedNodeId = node.dataset.nodeId;
-    state.selectedEdgeKey = null;
-    clearAlert();
-    renderAll();
   });
 
   DOM.canvas.addEventListener('scroll', function () {
@@ -2557,6 +2953,9 @@
 
   window.ArcticEventAdmin = {
     openWorkspace: openWorkspace,
+    saveDraftLocal: saveDraftLocal,
+    openPublishReview: openPublishReview,
+    publishEvent: publishEvent,
     validateAndSave: validateAndSave,
     loadTemplateDraft: loadTemplateDraft
   };
