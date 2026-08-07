@@ -1927,17 +1927,37 @@ a.switcher-nav-link {
 }
 
 .event-palette-item {
-  border: 1px dashed rgba(51, 78, 92, 0.24);
+  border: 1px solid rgba(51, 78, 92, 0.15);
   border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.52);
-  padding: var(--space-sm);
-  cursor: grab;
-  display: grid;
-  gap: var(--space-4xs);
+  padding: var(--space-2xs) var(--space-sm);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  text-align: left;
+  width: 100%;
+  transition: border-color 0.2s ease, background 0.2s ease;
 }
 
-.event-palette-item:active {
-  cursor: grabbing;
+.event-palette-item:hover:not(:disabled) {
+  border-color: rgba(42, 186, 248, 0.55);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.event-palette-item:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.event-palette-copy {
+  display: grid;
+  gap: var(--space-4xs);
+  min-width: 0;
+}
+
+.event-palette-tile {
+  flex: none;
 }
 
 .event-palette-title {
@@ -1979,16 +1999,6 @@ a.switcher-nav-link {
   background-size: 24px 24px, 24px 24px, auto;
   padding: var(--space-sm);
   position: relative;
-}
-
-.event-admin-canvas.is-drop-target {
-  border-color: rgba(42, 186, 248, 0.7);
-  box-shadow: inset 0 0 0 1px rgba(42, 186, 248, 0.2);
-}
-
-.event-admin-canvas-empty {
-  color: #99a6ad;
-  font-size: var(--text-xs);
 }
 
 .event-admin-canvas-meta {
@@ -2082,21 +2092,17 @@ a.switcher-nav-link {
 .event-canvas-graph {
   position: relative;
   min-height: 480px;
+  margin-inline: auto;
 }
 
 .event-canvas-node-layer {
   position: relative;
   z-index: 2;
-  min-height: 480px;
 }
 
-.event-canvas-session-group {
-  position: absolute;
-  z-index: 0;
-  border: 1px dashed rgba(42, 186, 248, 0.35);
-  border-radius: var(--radius-sm);
-  background: rgba(42, 186, 248, 0.05);
-  pointer-events: none;
+.event-canvas-insert-layer {
+  position: relative;
+  z-index: 3;
 }
 
 .event-canvas-toolbar {
@@ -2108,48 +2114,6 @@ a.switcher-nav-link {
   min-width: 0;
 }
 
-.event-canvas-port {
-  position: absolute;
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.95);
-  border: 1px solid rgba(51, 78, 92, 0.35);
-  z-index: 3;
-  cursor: crosshair;
-}
-
-.event-canvas-port-top {
-  top: -5px;
-  left: 50%;
-  transform: translateX(-50%);
-}
-
-.event-canvas-port-bottom {
-  bottom: -5px;
-  left: 50%;
-  transform: translateX(-50%);
-}
-
-.event-canvas-port-left {
-  left: -5px;
-  top: 50%;
-  transform: translateY(-50%);
-}
-
-.event-canvas-port-right {
-  right: -5px;
-  top: 50%;
-  transform: translateY(-50%);
-}
-
-.event-canvas-port::after {
-  content: '';
-  position: absolute;
-  inset: -8px;
-  border-radius: 999px;
-}
-
 .event-admin-canvas.is-space-pan {
   cursor: grab;
 }
@@ -2158,9 +2122,7 @@ a.switcher-nav-link {
   cursor: grabbing;
 }
 
-.event-canvas-edge-path.is-manual {
-  stroke: rgba(42, 186, 248, 0.72);
-}
+/* Connectors */
 
 .event-canvas-edges {
   position: absolute;
@@ -2172,38 +2134,77 @@ a.switcher-nav-link {
 
 .event-canvas-edge-path {
   fill: none;
-  stroke: rgba(51, 78, 92, 0.42);
-  stroke-width: 1.6;
-  pointer-events: stroke;
-  cursor: pointer;
+  stroke: rgba(51, 78, 92, 0.34);
+  stroke-width: 1.5;
+  stroke-linecap: round;
 }
 
-.event-canvas-edge-path.is-selected {
-  stroke: rgba(42, 186, 248, 0.95);
-  stroke-width: 2.4;
+.event-canvas-edge-path.is-branch {
+  stroke: rgba(42, 186, 248, 0.55);
 }
 
-.event-canvas-edge-path.is-preview {
-  stroke-dasharray: 4 4;
-  stroke: rgba(42, 186, 248, 0.65);
-  marker-end: none;
-  pointer-events: none;
-  cursor: default;
+.event-canvas-edge-path.is-stub {
+  stroke: rgba(42, 186, 248, 0.4);
+  stroke-dasharray: 3 4;
 }
 
-.event-canvas-node {
+.event-canvas-branch-label {
   position: absolute;
-  border: 1px solid rgba(51, 78, 92, 0.15);
-  border-radius: var(--radius-sm);
-  background: rgba(251, 252, 253, 0.82);
-  padding: var(--space-sm);
+  z-index: 2;
+  transform: translate(-50%, -50%);
+  max-width: 168px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid rgba(42, 186, 248, 0.35);
+  border-radius: 999px;
+  background: rgba(245, 251, 255, 0.95);
+  color: #12779e;
+  font-size: 11px;
+  line-height: var(--line-height-tight);
+  padding: 2px 10px;
+  pointer-events: none;
+}
+
+/* Terminals */
+
+.event-canvas-terminal {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(51, 78, 92, 0.2);
+  border-radius: 999px;
+  background: rgba(230, 235, 240, 0.85);
   box-sizing: border-box;
-  cursor: grab;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   user-select: none;
 }
 
-.event-canvas-node:active {
-  cursor: grabbing;
+/* Node cards */
+
+.event-canvas-node {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  border: 1px solid rgba(51, 78, 92, 0.15);
+  border-radius: var(--radius-sm);
+  background: rgba(251, 252, 253, 0.82);
+  padding: 0 var(--space-sm);
+  box-sizing: border-box;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.event-canvas-node:hover {
+  border-color: rgba(42, 186, 248, 0.45);
+  background: rgba(251, 252, 253, 0.95);
 }
 
 .event-canvas-node-session {
@@ -2212,7 +2213,6 @@ a.switcher-nav-link {
 }
 
 .event-canvas-node-child {
-  padding: var(--space-2xs) var(--space-sm);
   background: rgba(255, 255, 255, 0.88);
 }
 
@@ -2223,8 +2223,8 @@ a.switcher-nav-link {
 
 .event-canvas-node-error-badge {
   position: absolute;
-  top: 6px;
-  left: 6px;
+  top: -6px;
+  left: -6px;
   width: 16px;
   height: 16px;
   border-radius: 999px;
@@ -2248,44 +2248,84 @@ a.switcher-nav-link {
   box-shadow: inset 0 0 0 1px rgba(42, 186, 248, 0.25);
 }
 
+.event-canvas-node-tile,
+.event-palette-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: var(--radius-xs);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.event-canvas-tone-accent {
+  background: rgba(42, 186, 248, 0.18);
+  color: #12779e;
+}
+
+.event-canvas-tone-blue {
+  background: rgba(29, 109, 226, 0.14);
+  color: #1d6de2;
+}
+
+.event-canvas-tone-slate {
+  background: rgba(51, 78, 92, 0.1);
+  color: var(--text-secondary);
+}
+
+.event-canvas-tone-green {
+  background: rgba(60, 166, 93, 0.16);
+  color: #24693c;
+}
+
 .event-canvas-node-copy {
-  display: block;
-  width: 100%;
+  display: grid;
+  gap: 2px;
+  flex: 1;
   min-width: 0;
 }
 
-.event-canvas-node-head {
+.event-canvas-node-meta {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2xs);
+  gap: var(--space-3xs);
+  min-width: 0;
 }
 
 .event-canvas-node-title {
   color: var(--text-primary);
   font-size: var(--text-sm);
   font-weight: 600;
-  margin: 0;
-  padding: 0;
-  text-align: left;
-  flex: 1;
-  min-width: 0;
+  line-height: var(--line-height-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.event-canvas-node-helper {
+.event-canvas-node-kind {
   color: #99a6ad;
-  font-size: var(--text-xs);
+  font-size: 11px;
+  line-height: var(--line-height-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .event-canvas-node-remove {
   position: absolute;
-  top: 6px;
-  right: 6px;
+  top: -8px;
+  right: -8px;
   width: 20px;
   height: 20px;
   border: 1px solid rgba(171, 79, 0, 0.24);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.98);
   color: #ab4f00;
   font-size: 14px;
   line-height: 1;
@@ -2297,6 +2337,7 @@ a.switcher-nav-link {
   pointer-events: none;
   transform: scale(0.92);
   transition: opacity 120ms ease, transform 120ms ease;
+  z-index: 5;
 }
 
 .event-canvas-node:hover .event-canvas-node-remove,
@@ -2306,12 +2347,93 @@ a.switcher-nav-link {
   transform: scale(1);
 }
 
+/* Insertion affordance */
+
+.event-canvas-insert {
+  position: absolute;
+  transform: translate(-50%, -50%);
+}
+
+.event-canvas-insert-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid rgba(51, 78, 92, 0.22);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.event-canvas-insert-button:hover,
+.event-canvas-insert-button:focus-visible,
+.event-canvas-insert.is-open .event-canvas-insert-button {
+  opacity: 1;
+  border-color: rgba(42, 186, 248, 0.7);
+  color: #12779e;
+}
+
+/* Cleared past the half-width of a spine node so the menu never covers a card. */
+.event-canvas-insert-menu {
+  position: absolute;
+  top: 50%;
+  left: 128px;
+  transform: translateY(-50%);
+  display: grid;
+  gap: var(--space-4xs);
+  width: 200px;
+  border: 1px solid rgba(51, 78, 92, 0.16);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  box-shadow: 0 6px 16px rgba(51, 78, 92, 0.12);
+  padding: var(--space-3xs);
+  z-index: 6;
+}
+
+.event-canvas-insert-option {
+  display: grid;
+  gap: 1px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  padding: var(--space-3xs) var(--space-2xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.event-canvas-insert-option:hover,
+.event-canvas-insert-option:focus-visible {
+  background: rgba(42, 186, 248, 0.12);
+}
+
+.event-canvas-insert-option-title {
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.event-canvas-insert-option-helper {
+  color: #99a6ad;
+  font-size: 11px;
+  line-height: var(--line-height-tight);
+}
+
 .event-status {
   border-radius: var(--radius-xs);
   padding: 2px 6px;
   font-size: 11px;
   line-height: var(--line-height-tight);
   white-space: nowrap;
+}
+
+.event-canvas-node-meta > .event-status {
+  flex: none;
 }
 
 .event-status.not-started {

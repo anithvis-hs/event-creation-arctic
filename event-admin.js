@@ -1,16 +1,22 @@
 (function () {
   'use strict';
 
-  const STORAGE_KEY = 'arctic-ai-event-admin-draft-v3-canvas';
+  const STORAGE_KEY = 'arctic-ai-event-admin-draft-v4-stacked';
   const CANVAS_NODE_WIDTH = 220;
-  const CANVAS_NODE_HEIGHT = 72;
-  const CANVAS_CHILD_WIDTH = 196;
-  const CANVAS_CHILD_HEIGHT = 58;
-  const PORT_SIDES = ['top', 'right', 'bottom', 'left'];
-  const DEFAULT_FROM_PORT = 'bottom';
-  const DEFAULT_TO_PORT = 'top';
-  const PORT_SNAP_RADIUS = 20;
-  const NODE_DRAG_THRESHOLD = 4;
+  const CANVAS_NODE_HEIGHT = 56;
+  const CANVAS_TERMINAL_WIDTH = 132;
+  const CANVAS_TERMINAL_HEIGHT = 36;
+  const CANVAS_ROW_GAP = 48;
+  const CANVAS_COL_GAP = 48;
+  // Deeper than a normal row so the fan-out bus and its branch labels have room.
+  const CANVAS_BRANCH_GAP = 84;
+  const CANVAS_BRANCH_BUS_OFFSET = 26;
+  const CANVAS_PADDING = 48;
+  const CANVAS_CORNER = 10;
+  // The stacked spine is much taller than it is wide, so "Fit graph" needs to be
+  // able to zoom out further than the old free-form canvas did.
+  const CANVAS_MIN_ZOOM = 0.25;
+  const CANVAS_MAX_ZOOM = 1.6;
   const STATUS = {
     NOT_STARTED: 'Not started',
     IN_PROGRESS: 'In progress',
@@ -48,6 +54,36 @@
 
   const SESSION_CHILD_TYPES = SESSION_CHILD_DEFS.map(function (item) { return item.type; });
   const CANVAS_ONLY_TYPES = SESSION_CHILD_TYPES.concat([NODE_TYPES.SESSION]);
+
+  // Drives the stacked spine: node order on the canvas is derived from this list,
+  // never from stored coordinates.
+  const CANONICAL_ROOT_ORDER = [
+    NODE_TYPES.BASICS,
+    NODE_TYPES.REGISTRATION,
+    NODE_TYPES.BANNER,
+    NODE_TYPES.INSTRUCTORS,
+    NODE_TYPES.SESSIONS
+  ];
+
+  const NODE_VISUALS = {};
+  NODE_VISUALS[NODE_TYPES.BASICS] = { kind: 'Event details', glyph: 'Ev', tone: 'blue' };
+  NODE_VISUALS[NODE_TYPES.REGISTRATION] = { kind: 'Registration', glyph: 'Rg', tone: 'blue' };
+  NODE_VISUALS[NODE_TYPES.BANNER] = { kind: 'Media', glyph: 'Bn', tone: 'slate' };
+  NODE_VISUALS[NODE_TYPES.INSTRUCTORS] = { kind: 'People', glyph: 'In', tone: 'slate' };
+  NODE_VISUALS[NODE_TYPES.SESSIONS] = { kind: 'Branch point', glyph: 'Sc', tone: 'accent' };
+  NODE_VISUALS[NODE_TYPES.SESSION] = { kind: 'Session branch', glyph: 'Se', tone: 'accent' };
+  NODE_VISUALS[NODE_TYPES.SESSION_BASICS] = { kind: 'Session detail', glyph: 'Ba', tone: 'slate' };
+  NODE_VISUALS[NODE_TYPES.SESSION_SCHEDULE] = { kind: 'Session detail', glyph: 'Sh', tone: 'slate' };
+  NODE_VISUALS[NODE_TYPES.SESSION_VENUE] = { kind: 'Session detail', glyph: 'Vn', tone: 'slate' };
+  NODE_VISUALS[NODE_TYPES.SESSION_CAPACITY] = { kind: 'Session detail', glyph: 'Cp', tone: 'slate' };
+  NODE_VISUALS[NODE_TYPES.SESSION_INSTRUCTORS] = { kind: 'Session detail', glyph: 'In', tone: 'slate' };
+  NODE_VISUALS[NODE_TYPES.SESSION_MATERIALS] = { kind: 'Session detail', glyph: 'Mt', tone: 'slate' };
+  NODE_VISUALS[NODE_TYPES.SESSION_REG_RULES] = { kind: 'Session detail', glyph: 'Rr', tone: 'slate' };
+  NODE_VISUALS[NODE_TYPES.SESSION_PUBLISH_CHECKS] = { kind: 'Readiness', glyph: 'Pc', tone: 'green' };
+
+  function getNodeVisual(type) {
+    return NODE_VISUALS[type] || { kind: 'Node', glyph: '??', tone: 'slate' };
+  }
 
   const MAX_BANNER_BYTES = 5 * 1024 * 1024;
   const SINGLETON_TYPES = [NODE_TYPES.BASICS, NODE_TYPES.REGISTRATION, NODE_TYPES.BANNER, NODE_TYPES.INSTRUCTORS, NODE_TYPES.SESSIONS];
@@ -110,12 +146,10 @@
     attemptedNodeIds: {},
     isInitialized: false,
     canvasView: { scale: 1, panX: 0, panY: 0 },
-    nodeDrag: null,
-    edgeDrag: null,
     panDrag: null,
-    selectedEdgeKey: null,
     spacePanActive: false,
-    removedAutoEdges: {}
+    layout: null,
+    openInsertKey: null
   };
 
   let toastTimeoutId = null;
@@ -222,7 +256,7 @@
       waitlist: 'disabled',
       instructors: ['Jordan Lee', 'jordan@example.com']
     });
-    layoutAllNodes(draft);
+    syncGraphStructure(draft);
     return draft;
   }
 
@@ -264,7 +298,7 @@
       capacity: '100',
       instructors: ['Sam Patel', 'sam@example.com']
     });
-    layoutAllNodes(draft);
+    syncGraphStructure(draft);
     return draft;
   }
 
@@ -295,7 +329,7 @@
       capacity: '24',
       instructors: ['Jordan Lee', 'jordan@example.com']
     });
-    layoutAllNodes(draft);
+    syncGraphStructure(draft);
     return draft;
   }
 
@@ -437,10 +471,16 @@
     }, duration);
   }
 
+  // Coordinates are derived from the graph at render time, so they never persist.
+  function omitDerivedCoords(key, value) {
+    if (key === 'x' || key === 'y') return undefined;
+    return value;
+  }
+
   function saveDraft(manual) {
     if (!state.draft) return;
     state.draft.meta.lastSavedAt = Date.now();
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state.draft));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state.draft, omitDerivedCoords));
     if (manual) state.draft.meta.isDirty = false;
   }
 
@@ -450,140 +490,9 @@
 
   function selectCanvasNode(nodeId) {
     state.selectedNodeId = nodeId;
-    state.selectedEdgeKey = null;
+    state.openInsertKey = null;
     clearAlert();
     renderAll();
-  }
-
-  function updateNodeElementPosition(node) {
-    const display = toDisplayCoord(node.x, node.y, state.draft);
-    const nodeEl = DOM.canvas.querySelector(`[data-node-id="${node.id}"]`);
-    if (nodeEl) {
-      nodeEl.style.left = `${display.x}px`;
-      nodeEl.style.top = `${display.y}px`;
-    }
-  }
-
-  function syncGraphContainerSize() {
-    const graph = DOM.canvas.querySelector('#event-canvas-graph');
-    if (!graph || !state.draft) return;
-    graph.style.width = `${state.draft.meta.graphWidth || 960}px`;
-    graph.style.height = `${state.draft.meta.graphHeight || 720}px`;
-  }
-
-  function startNodeDrag(nodeId, event) {
-    const node = getNodeById(nodeId);
-    if (!node) return;
-    const point = getCanvasPointFromEvent(event);
-    const origin = getGraphOrigin(state.draft);
-    const display = toDisplayCoord(node.x, node.y, state.draft);
-    state.nodeDrag = {
-      nodeId: nodeId,
-      offsetX: point.x - display.x,
-      offsetY: point.y - display.y,
-      originX: origin.x,
-      originY: origin.y,
-      startClientX: event.clientX,
-      startClientY: event.clientY,
-      isDragging: false
-    };
-  }
-
-  function moveNodeDrag(event) {
-    if (!state.nodeDrag) return;
-    const node = getNodeById(state.nodeDrag.nodeId);
-    if (!node) return;
-
-    if (!state.nodeDrag.isDragging) {
-      const dx = event.clientX - state.nodeDrag.startClientX;
-      const dy = event.clientY - state.nodeDrag.startClientY;
-      if (Math.hypot(dx, dy) < NODE_DRAG_THRESHOLD) return;
-      state.nodeDrag.isDragging = true;
-    }
-
-    const point = getCanvasPointFromEvent(event);
-    node.x = point.x - state.nodeDrag.offsetX + state.nodeDrag.originX;
-    node.y = point.y - state.nodeDrag.offsetY + state.nodeDrag.originY;
-    if (node.type === NODE_TYPES.SESSION) layoutSessionGroup(state.draft, node.id);
-    updateNodeElementPosition(node);
-    drawCanvasEdges();
-  }
-
-  function finishNodeDrag() {
-    if (!state.nodeDrag) return;
-    const nodeId = state.nodeDrag.nodeId;
-    const didDrag = state.nodeDrag.isDragging;
-    state.nodeDrag = null;
-
-    if (!didDrag) {
-      selectCanvasNode(nodeId);
-      return;
-    }
-
-    const prevOrigin = getGraphOrigin(state.draft);
-    updateGraphBounds(state.draft);
-    refreshEdgePorts(state.draft);
-    const nextOrigin = getGraphOrigin(state.draft);
-    const originChanged = prevOrigin.x !== nextOrigin.x || prevOrigin.y !== nextOrigin.y;
-
-    if (originChanged) {
-      renderCanvas();
-    } else {
-      syncGraphContainerSize();
-      drawCanvasEdges();
-    }
-    markDirty();
-  }
-
-  function startEdgeDrag(fromNodeId, fromPort, event) {
-    const point = getCanvasPointFromEvent(event);
-    state.edgeDrag = {
-      fromNodeId: fromNodeId,
-      fromPort: fromPort || DEFAULT_FROM_PORT,
-      currentX: point.x,
-      currentY: point.y
-    };
-    drawCanvasEdges();
-  }
-
-  function moveEdgeDrag(event) {
-    if (!state.edgeDrag) return;
-    const point = getCanvasPointFromEvent(event);
-    state.edgeDrag.currentX = point.x;
-    state.edgeDrag.currentY = point.y;
-    drawCanvasEdges();
-  }
-
-  function finishEdgeDrag(targetNodeId, toPort, event) {
-    if (!state.edgeDrag) return;
-    const fromId = state.edgeDrag.fromNodeId;
-    const fromPort = state.edgeDrag.fromPort;
-    state.edgeDrag = null;
-
-    let targetId = targetNodeId;
-    let targetPortSide = toPort;
-
-    if ((!targetId || !targetPortSide) && event) {
-      const point = getCanvasPointFromEvent(event);
-      const snap = findSnapPortAtPoint(point.x, point.y, fromId);
-      if (snap) {
-        targetId = snap.nodeId;
-        targetPortSide = snap.portSide;
-      }
-    }
-
-    if (!targetId || targetId === fromId || !targetPortSide) {
-      drawCanvasEdges();
-      showToast('Release on another node handle to connect.', 4000);
-      return;
-    }
-
-    addManualEdge(state.draft, fromId, targetId, fromPort, targetPortSide);
-    state.selectedEdgeKey = `${fromId}->${targetId}`;
-    state.selectedNodeId = null;
-    markDirty();
-    renderAll();
-    showToast(`Connected ${getNodeLabelById(state.draft, fromId)} → ${getNodeLabelById(state.draft, targetId)}.`, 4000);
   }
 
   function startPanDrag(event) {
@@ -600,7 +509,6 @@
     state.canvasView.panX = state.panDrag.originX + (event.clientX - state.panDrag.startX);
     state.canvasView.panY = state.panDrag.originY + (event.clientY - state.panDrag.startY);
     applyCanvasTransform();
-    drawCanvasEdges();
   }
 
   function finishPanDrag() {
@@ -615,9 +523,6 @@
     state.draft.meta.publishedAt = null;
     state.draft.meta.warningsAcknowledged = false;
     state.draft.meta.warningsAckNote = '';
-    if (state.draft.meta) {
-      state.draft.meta.removedAutoEdges = state.removedAutoEdges;
-    }
     saveDraft(false);
     renderSummary();
     updateHeaderButtons();
@@ -673,78 +578,240 @@
     }
   }
 
-  function layoutRootNodes(draft) {
-    const rootNodes = draft.nodes.filter(function (node) {
-      return !node.parentSessionId && !isSessionChildType(node.type);
-    });
-    rootNodes.forEach(function (node, index) {
-      if (typeof node.x !== 'number') node.x = 48;
-      if (typeof node.y !== 'number') node.y = 48 + (index * 112);
-    });
-  }
-
-  function layoutSessionGroup(draft, sessionId) {
-    const sessionNode = draft.nodes.find(function (node) { return node.id === sessionId; });
-    if (!sessionNode) return;
-
-    const sessionIndex = draft.sessions.indexOf(sessionId);
-    const baseX = 320;
-    const baseY = 48 + (Math.max(sessionIndex, 0) * 420);
-
-    if (typeof sessionNode.x !== 'number') sessionNode.x = baseX;
-    if (typeof sessionNode.y !== 'number') sessionNode.y = baseY;
-
-    const childNodes = getSessionChildNodes(draft, sessionId);
-    childNodes.forEach(function (child, childIndex) {
-      if (typeof child.x !== 'number') child.x = baseX + 248;
-      if (typeof child.y !== 'number') child.y = baseY + (childIndex * 72);
-    });
-  }
-
-  function layoutAllNodes(draft) {
+  function syncGraphStructure(draft) {
     syncSessionIndex(draft);
-    layoutRootNodes(draft);
-    draft.sessions.forEach(function (sessionId) { layoutSessionGroup(draft, sessionId); });
-    updateGraphBounds(draft);
   }
 
-  function getGraphOrigin(draft) {
-    const target = draft || state.draft;
-    if (!target || !target.meta) return { x: 0, y: 0 };
-    return {
-      x: typeof target.meta.graphOriginX === 'number' ? target.meta.graphOriginX : 0,
-      y: typeof target.meta.graphOriginY === 'number' ? target.meta.graphOriginY : 0
-    };
-  }
-
-  function toDisplayCoord(x, y, draft) {
-    const origin = getGraphOrigin(draft);
-    return {
-      x: (x || 0) - origin.x,
-      y: (y || 0) - origin.y
-    };
-  }
-
-  function updateGraphBounds(draft) {
-    let minX = 0;
-    let minY = 0;
-    let maxX = 640;
-    let maxY = 480;
-    const padding = 48;
+  function getSpineRootNodes(draft) {
+    const byType = {};
     draft.nodes.forEach(function (node) {
-      const width = isSessionChildType(node.type) ? CANVAS_CHILD_WIDTH : CANVAS_NODE_WIDTH;
-      const height = isSessionChildType(node.type) ? CANVAS_CHILD_HEIGHT : CANVAS_NODE_HEIGHT;
-      const x = node.x || 0;
-      const y = node.y || 0;
-      minX = Math.min(minX, x - padding);
-      minY = Math.min(minY, y - padding);
-      maxX = Math.max(maxX, x + width + padding);
-      maxY = Math.max(maxY, y + height + padding);
+      if (CANONICAL_ROOT_ORDER.indexOf(node.type) > -1 && !byType[node.type]) byType[node.type] = node;
     });
-    draft.meta.graphOriginX = minX;
-    draft.meta.graphOriginY = minY;
-    draft.meta.graphWidth = maxX - minX;
-    draft.meta.graphHeight = maxY - minY;
+    return CANONICAL_ROOT_ORDER
+      .map(function (type) { return byType[type]; })
+      .filter(Boolean);
+  }
+
+  function getInsertTypesForGap(draft, prevType, nextType) {
+    const prevIndex = prevType ? CANONICAL_ROOT_ORDER.indexOf(prevType) : -1;
+    const nextIndex = nextType ? CANONICAL_ROOT_ORDER.indexOf(nextType) : CANONICAL_ROOT_ORDER.length;
+    return CANONICAL_ROOT_ORDER.filter(function (type, index) {
+      if (index <= prevIndex || index >= nextIndex) return false;
+      return !findSingletonNodeId(draft, type);
+    });
+  }
+
+  function makeLayoutEntry(node, x, y) {
+    return {
+      id: node.id,
+      node: node,
+      isTerminal: false,
+      x: x,
+      y: y,
+      width: CANVAS_NODE_WIDTH,
+      height: CANVAS_NODE_HEIGHT
+    };
+  }
+
+  function makeTerminalEntry(id, label, x, y) {
+    return {
+      id: id,
+      node: null,
+      isTerminal: true,
+      label: label,
+      x: x,
+      y: y,
+      width: CANVAS_TERMINAL_WIDTH,
+      height: CANVAS_TERMINAL_HEIGHT
+    };
+  }
+
+  function entryBottom(entry) {
+    return entry.y + entry.height;
+  }
+
+  function entryCenterX(entry) {
+    return entry.x + (entry.width / 2);
+  }
+
+  // Vertical -> horizontal -> vertical elbow with rounded corners. Collapses to a
+  // straight line when the two endpoints already share a column.
+  function buildElbowPath(x1, y1, x2, y2, busY) {
+    if (Math.abs(x2 - x1) < 0.5) return `M ${x1} ${y1} L ${x1} ${y2}`;
+    const direction = x2 > x1 ? 1 : -1;
+    const radius = Math.max(0, Math.min(
+      CANVAS_CORNER,
+      Math.abs(x2 - x1) / 2,
+      Math.abs(busY - y1),
+      Math.abs(y2 - busY)
+    ));
+    return [
+      `M ${x1} ${y1}`,
+      `L ${x1} ${busY - radius}`,
+      `Q ${x1} ${busY} ${x1 + (radius * direction)} ${busY}`,
+      `L ${x2 - (radius * direction)} ${busY}`,
+      `Q ${x2} ${busY} ${x2} ${busY + radius}`,
+      `L ${x2} ${y2}`
+    ].join(' ');
+  }
+
+  /**
+   * Positions every node from the graph hierarchy alone. Nothing here reads or
+   * writes node.x / node.y — the canvas is a pure function of the draft.
+   */
+  function buildLayoutTree(draft) {
+    syncGraphStructure(draft);
+
+    const entries = [];
+    const connectors = [];
+    const inserts = [];
+    const branchLabels = [];
+
+    const spineNodes = getSpineRootNodes(draft);
+    const sessionsContainer = spineNodes.find(function (node) { return node.type === NODE_TYPES.SESSIONS; }) || null;
+    const sessionIds = sessionsContainer ? draft.sessions.slice() : [];
+    const columnCount = sessionIds.length;
+
+    const branchWidth = columnCount
+      ? (columnCount * CANVAS_NODE_WIDTH) + ((columnCount - 1) * CANVAS_COL_GAP)
+      : 0;
+    const contentWidth = Math.max(CANVAS_NODE_WIDTH, branchWidth);
+    const centerX = CANVAS_PADDING + (contentWidth / 2);
+
+    function pushSpineInsert(fromEntry, toEntryY, prevType, nextType, extraTypes) {
+      const types = getInsertTypesForGap(draft, prevType, nextType).concat(extraTypes || []);
+      if (!types.length) return;
+      inserts.push({
+        key: `slot-${prevType || 'start'}-${nextType || 'end'}`,
+        x: centerX,
+        y: (entryBottom(fromEntry) + toEntryY) / 2,
+        types: types
+      });
+    }
+
+    let cursorY = CANVAS_PADDING;
+    const startEntry = makeTerminalEntry('__start', 'Start', centerX - (CANVAS_TERMINAL_WIDTH / 2), cursorY);
+    entries.push(startEntry);
+    cursorY = entryBottom(startEntry) + CANVAS_ROW_GAP;
+
+    let previousEntry = startEntry;
+    let previousType = null;
+
+    spineNodes.forEach(function (node) {
+      const entry = makeLayoutEntry(node, centerX - (CANVAS_NODE_WIDTH / 2), cursorY);
+      entries.push(entry);
+      connectors.push({
+        kind: 'spine',
+        d: `M ${centerX} ${entryBottom(previousEntry)} L ${centerX} ${entry.y}`
+      });
+      pushSpineInsert(previousEntry, entry.y, previousType, node.type);
+      previousEntry = entry;
+      previousType = node.type;
+      cursorY = entryBottom(entry) + CANVAS_ROW_GAP;
+    });
+
+    let mergeSources = [];
+
+    if (columnCount) {
+      const branchTop = entryBottom(previousEntry) + CANVAS_BRANCH_GAP;
+      const fanBusY = entryBottom(previousEntry) + CANVAS_BRANCH_BUS_OFFSET;
+      const branchStartX = centerX - (branchWidth / 2);
+      let branchBottom = branchTop;
+
+      sessionIds.forEach(function (sessionId, columnIndex) {
+        const sessionNode = draft.nodes.find(function (item) { return item.id === sessionId; });
+        if (!sessionNode) return;
+
+        const columnX = branchStartX + (columnIndex * (CANVAS_NODE_WIDTH + CANVAS_COL_GAP));
+        const columnCenterX = columnX + (CANVAS_NODE_WIDTH / 2);
+        const headEntry = makeLayoutEntry(sessionNode, columnX, branchTop);
+        entries.push(headEntry);
+
+        connectors.push({
+          kind: 'branch',
+          d: buildElbowPath(centerX, entryBottom(previousEntry), columnCenterX, headEntry.y, fanBusY)
+        });
+
+        const payload = draft.payloadByNodeId[sessionId] || {};
+        branchLabels.push({
+          x: columnCenterX,
+          y: (fanBusY + branchTop) / 2,
+          text: cleanText(payload.title) || cleanText(sessionNode.label) || `Session ${columnIndex + 1}`
+        });
+
+        let columnTail = headEntry;
+        getSessionChildNodes(draft, sessionId).forEach(function (child) {
+          const childEntry = makeLayoutEntry(child, columnX, entryBottom(columnTail) + CANVAS_ROW_GAP);
+          entries.push(childEntry);
+          connectors.push({
+            kind: 'spine',
+            d: `M ${columnCenterX} ${entryBottom(columnTail)} L ${columnCenterX} ${childEntry.y}`
+          });
+          columnTail = childEntry;
+        });
+
+        mergeSources.push(columnTail);
+        branchBottom = Math.max(branchBottom, entryBottom(columnTail));
+      });
+
+      // Stub extending the fan-out bus so the add-branch button reads as part of it.
+      const addSessionX = branchStartX + branchWidth + CANVAS_COL_GAP;
+      connectors.push({
+        kind: 'stub',
+        d: `M ${branchStartX + branchWidth - (CANVAS_NODE_WIDTH / 2)} ${fanBusY} L ${addSessionX - 14} ${fanBusY}`
+      });
+      inserts.push({
+        key: 'branch-add-session',
+        x: addSessionX,
+        y: fanBusY,
+        types: [NODE_TYPES.SESSION]
+      });
+
+      cursorY = branchBottom + CANVAS_ROW_GAP;
+    } else {
+      mergeSources = [previousEntry];
+    }
+
+    const endEntry = makeTerminalEntry('__end', 'End', centerX - (CANVAS_TERMINAL_WIDTH / 2), cursorY);
+    entries.push(endEntry);
+
+    if (columnCount) {
+      const mergeBusY = endEntry.y - (CANVAS_ROW_GAP / 2);
+      mergeSources.forEach(function (source) {
+        connectors.push({
+          kind: 'branch',
+          d: buildElbowPath(entryCenterX(source), entryBottom(source), centerX, endEntry.y, mergeBusY)
+        });
+      });
+    } else {
+      connectors.push({
+        kind: 'spine',
+        d: `M ${centerX} ${entryBottom(previousEntry)} L ${centerX} ${endEntry.y}`
+      });
+      pushSpineInsert(
+        previousEntry,
+        endEntry.y,
+        previousType,
+        null,
+        sessionsContainer ? [NODE_TYPES.SESSION] : []
+      );
+    }
+
+    const rightEdge = entries.reduce(function (max, entry) {
+      return Math.max(max, entry.x + entry.width);
+    }, centerX + (contentWidth / 2));
+    const insertEdge = inserts.reduce(function (max, insert) {
+      return Math.max(max, insert.x + 16);
+    }, 0);
+
+    return {
+      entries: entries,
+      connectors: connectors,
+      inserts: inserts,
+      branchLabels: branchLabels,
+      width: Math.max(rightEdge, insertEdge) + CANVAS_PADDING,
+      height: entryBottom(endEntry) + CANVAS_PADDING
+    };
   }
 
   function ensureSessionBranch(draft, sessionId) {
@@ -766,10 +833,9 @@
         order: index + 1
       });
       draft.payloadByNodeId[childId] = createSessionChildPayload(def.type);
-      addEdgeIfMissing(draft, sessionId, childId, true);
+      addEdgeIfMissing(draft, sessionId, childId);
     });
 
-    layoutSessionGroup(draft, sessionId);
     syncSessionIndex(draft);
   }
 
@@ -823,20 +889,19 @@
     if (typeof draft.meta.warningsAcknowledged !== 'boolean') draft.meta.warningsAcknowledged = false;
     if (typeof draft.meta.warningsAckNote !== 'string') draft.meta.warningsAckNote = '';
 
+    // Positions are derived at render time now; drop any coordinates left by
+    // older free-form drafts.
     draft.nodes.forEach(function (node) {
-      if (typeof node.x !== 'number' || typeof node.y !== 'number') {
-        node.x = undefined;
-        node.y = undefined;
-      }
+      delete node.x;
+      delete node.y;
     });
 
     draft.nodes
       .filter(function (node) { return node.type === NODE_TYPES.SESSION; })
       .forEach(function (sessionNode) { ensureSessionBranch(draft, sessionNode.id); });
 
-    layoutAllNodes(draft);
+    syncGraphStructure(draft);
     syncDefaultEdges(draft);
-    refreshEdgePorts(draft);
   }
 
   function updateTemplateGalleryVisibility() {
@@ -873,7 +938,7 @@
   function zoomCanvasAt(clientX, clientY, deltaScale) {
     const point = getCanvasContainerPoint(clientX, clientY);
     const oldScale = state.canvasView.scale;
-    const newScale = Math.max(0.5, Math.min(1.6, oldScale + deltaScale));
+    const newScale = Math.max(CANVAS_MIN_ZOOM, Math.min(CANVAS_MAX_ZOOM, oldScale + deltaScale));
     if (newScale === oldScale) return;
     const ratio = newScale / oldScale;
     state.canvasView.panX = point.x - (point.x - state.canvasView.panX) * ratio;
@@ -882,48 +947,34 @@
   }
 
   function setCanvasZoom(nextScale) {
-    state.canvasView.scale = Math.max(0.5, Math.min(1.6, nextScale));
+    state.canvasView.scale = Math.max(CANVAS_MIN_ZOOM, Math.min(CANVAS_MAX_ZOOM, nextScale));
     applyCanvasTransform();
-    drawCanvasEdges();
   }
 
   function resetCanvasView() {
     state.canvasView = { scale: 1, panX: 0, panY: 0 };
     applyCanvasTransform();
-    drawCanvasEdges();
   }
 
   function fitCanvasToGraph() {
-    if (!state.draft || !state.draft.nodes.length) return;
-    layoutAllNodes(state.draft);
+    if (!state.draft || !state.layout) return;
     const padding = 32;
-    const graphWidth = state.draft.meta.graphWidth || 960;
-    const graphHeight = state.draft.meta.graphHeight || 720;
+    const graphWidth = state.layout.width;
+    const graphHeight = state.layout.height;
     const viewWidth = Math.max(1, DOM.canvas.clientWidth);
     const viewHeight = Math.max(1, DOM.canvas.clientHeight);
     const scaleX = (viewWidth - (padding * 2)) / graphWidth;
     const scaleY = (viewHeight - (padding * 2)) / graphHeight;
-    const scale = Math.max(0.5, Math.min(1.6, Math.min(scaleX, scaleY, 1)));
+    const scale = Math.max(CANVAS_MIN_ZOOM, Math.min(CANVAS_MAX_ZOOM, Math.min(scaleX, scaleY, 1)));
     state.canvasView.scale = scale;
-    state.canvasView.panX = Math.max(padding, (viewWidth - (graphWidth * scale)) / 2);
-    state.canvasView.panY = padding;
+    state.canvasView.panX = Math.max(0, (viewWidth - (graphWidth * scale)) / 2);
+    state.canvasView.panY = 0;
     applyCanvasTransform();
-    drawCanvasEdges();
   }
 
   function setSpacePanActive(isActive) {
     state.spacePanActive = isActive;
     DOM.canvas.classList.toggle('is-space-pan', isActive);
-  }
-
-  function getCanvasPointFromEvent(event) {
-    const graph = DOM.canvas.querySelector('#event-canvas-graph');
-    if (!graph) return { x: 0, y: 0 };
-    const rect = graph.getBoundingClientRect();
-    return {
-      x: (event.clientX - rect.left) / state.canvasView.scale,
-      y: (event.clientY - rect.top) / state.canvasView.scale
-    };
   }
 
   function createNodePayload(type, nodeId, draft) {
@@ -932,7 +983,7 @@
     if (type === NODE_TYPES.BANNER) return { fileName: '', fileType: '', fileSize: 0 };
     if (type === NODE_TYPES.INSTRUCTORS) return { entries: [] };
     if (type === NODE_TYPES.SESSIONS) return { sessionIds: [] };
-    if (type === NODE_TYPES.SESSION) return { title: `Session ${countNodesOfType(draft, NODE_TYPES.SESSION) + 1}` };
+    if (type === NODE_TYPES.SESSION) return { title: `Session ${countNodesOfType(draft, NODE_TYPES.SESSION)}` };
     if (isSessionChildType(type)) return createSessionChildPayload(type);
     return {};
   }
@@ -946,216 +997,10 @@
     return found ? found.id : null;
   }
 
-  function getNodeDimensions(node) {
-    const isChild = isSessionChildType(node.type);
-    return {
-      width: isChild ? CANVAS_CHILD_WIDTH : CANVAS_NODE_WIDTH,
-      height: isChild ? CANVAS_CHILD_HEIGHT : CANVAS_NODE_HEIGHT
-    };
-  }
-
-  function normalizePortSide(side) {
-    return PORT_SIDES.indexOf(side) > -1 ? side : null;
-  }
-
-  function getNodeCenter(node) {
-    const dims = getNodeDimensions(node);
-    return {
-      x: (node.x || 0) + (dims.width / 2),
-      y: (node.y || 0) + (dims.height / 2)
-    };
-  }
-
-  function getNodePortPoint(node, side) {
-    const dims = getNodeDimensions(node);
-    const display = toDisplayCoord(node.x, node.y);
-    const x = display.x;
-    const y = display.y;
-    const port = normalizePortSide(side) || DEFAULT_FROM_PORT;
-
-    if (port === 'top') return { x: x + (dims.width / 2), y: y, side: port };
-    if (port === 'bottom') return { x: x + (dims.width / 2), y: y + dims.height, side: port };
-    if (port === 'left') return { x: x, y: y + (dims.height / 2), side: port };
-    return { x: x + dims.width, y: y + (dims.height / 2), side: 'right' };
-  }
-
-  function getBestEdgePorts(fromNode, toNode) {
-    const fromCenter = getNodeCenter(fromNode);
-    const toCenter = getNodeCenter(toNode);
-    const dx = toCenter.x - fromCenter.x;
-    const dy = toCenter.y - fromCenter.y;
-    const absDx = Math.abs(dx);
-    const absDy = Math.abs(dy);
-
-    if (absDx > absDy + 4) {
-      if (dx >= 0) return { fromPort: 'right', toPort: 'left' };
-      return { fromPort: 'left', toPort: 'right' };
-    }
-
-    if (dy >= 0) return { fromPort: 'bottom', toPort: 'top' };
-    return { fromPort: 'top', toPort: 'bottom' };
-  }
-
-  function resolveEdgePorts(edge, fromNode, toNode) {
-    if (edge.manual && edge.fromPort && edge.toPort) {
-      return {
-        fromPort: normalizePortSide(edge.fromPort) || DEFAULT_FROM_PORT,
-        toPort: normalizePortSide(edge.toPort) || DEFAULT_TO_PORT
-      };
-    }
-    return getBestEdgePorts(fromNode, toNode);
-  }
-
-  function refreshEdgePorts(draft, singleEdge) {
-    if (!draft || !draft.edges) return;
-
-    draft.edges.forEach(function (edge) {
-      if (singleEdge && edge !== singleEdge) return;
-      if (edge.manual) return;
-
-      const fromNode = draft.nodes.find(function (node) { return node.id === edge.from; });
-      const toNode = draft.nodes.find(function (node) { return node.id === edge.to; });
-
-      if (!fromNode || !toNode) {
-        edge.fromPort = edge.fromPort || DEFAULT_FROM_PORT;
-        edge.toPort = edge.toPort || DEFAULT_TO_PORT;
-        return;
-      }
-
-      const best = getBestEdgePorts(fromNode, toNode);
-      edge.fromPort = best.fromPort;
-      edge.toPort = best.toPort;
-    });
-  }
-
-  function getEdgeKey(edge) {
-    return `${edge.from}->${edge.to}`;
-  }
-
-  function findEdgeByKey(draft, edgeKey) {
-    return draft.edges.find(function (edge) { return getEdgeKey(edge) === edgeKey; }) || null;
-  }
-
-  function getNodeLabelById(draft, nodeId) {
-    const node = draft.nodes.find(function (item) { return item.id === nodeId; });
-    return node ? cleanText(node.label) : 'Node';
-  }
-
-  function findSnapPortAtPoint(x, y, excludeNodeId) {
-    if (!state.draft) return null;
-    let match = null;
-    let bestDistance = PORT_SNAP_RADIUS;
-
-    state.draft.nodes.forEach(function (node) {
-      if (node.id === excludeNodeId) return;
-      PORT_SIDES.forEach(function (side) {
-        const portPoint = getNodePortPoint(node, side);
-        const distance = Math.hypot(portPoint.x - x, portPoint.y - y);
-        if (distance < bestDistance) {
-          bestDistance = distance;
-          match = { nodeId: node.id, portSide: side };
-        }
-      });
-    });
-
-    return match;
-  }
-
-  function removeEdgeByKey(edgeKey) {
-    const edge = findEdgeByKey(state.draft, edgeKey);
-    if (!edge) return false;
-
-    if (!edge.manual) {
-      state.removedAutoEdges[edgeKey] = true;
-    }
-
-    state.draft.edges = state.draft.edges.filter(function (item) {
-      return getEdgeKey(item) !== edgeKey;
-    });
-    state.selectedEdgeKey = null;
-    markDirty();
-    renderAll();
-    showToast('Connection removed.', 4000);
-    return true;
-  }
-
-  function isAutoEdgeSuppressed(from, to) {
-    return Boolean(state.removedAutoEdges[`${from}->${to}`]);
-  }
-
-  function buildEdgePath(x1, y1, fromPort, x2, y2, toPort) {
-    const offset = Math.max(28, Math.abs(x2 - x1) * 0.25, Math.abs(y2 - y1) * 0.25);
-    let c1x = x1;
-    let c1y = y1;
-    let c2x = x2;
-    let c2y = y2;
-
-    if (fromPort === 'top') c1y -= offset;
-    else if (fromPort === 'bottom') c1y += offset;
-    else if (fromPort === 'left') c1x -= offset;
-    else if (fromPort === 'right') c1x += offset;
-
-    if (toPort === 'top') c2y -= offset;
-    else if (toPort === 'bottom') c2y += offset;
-    else if (toPort === 'left') c2x -= offset;
-    else if (toPort === 'right') c2x += offset;
-
-    return `M ${x1} ${y1} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${x2} ${y2}`;
-  }
-
-  function backfillEdgePorts(draft, edge) {
-    refreshEdgePorts(draft, edge || null);
-  }
-
-  function addEdgeIfMissing(draft, from, to, manual, portOptions) {
-    const opts = portOptions || {};
+  function addEdgeIfMissing(draft, from, to) {
     const existing = draft.edges.find(function (edge) { return edge.from === from && edge.to === to; });
-
-    if (existing) {
-      if (!existing.manual) refreshEdgePorts(draft, existing);
-      return;
-    }
-
-    const fromNode = draft.nodes.find(function (node) { return node.id === from; });
-    const toNode = draft.nodes.find(function (node) { return node.id === to; });
-    let fromPort = normalizePortSide(opts.fromPort);
-    let toPort = normalizePortSide(opts.toPort);
-
-    if (!fromPort || !toPort) {
-      const best = fromNode && toNode ? getBestEdgePorts(fromNode, toNode) : { fromPort: DEFAULT_FROM_PORT, toPort: DEFAULT_TO_PORT };
-      fromPort = fromPort || best.fromPort;
-      toPort = toPort || best.toPort;
-    }
-
-    draft.edges.push({
-      from: from,
-      to: to,
-      manual: Boolean(manual),
-      fromPort: fromPort,
-      toPort: toPort
-    });
-  }
-
-  function addManualEdge(draft, from, to, fromPort, toPort) {
-    const edgeKey = `${from}->${to}`;
-    const existing = draft.edges.find(function (edge) { return edge.from === from && edge.to === to; });
-
-    if (existing) {
-      existing.manual = true;
-      existing.fromPort = normalizePortSide(fromPort) || existing.fromPort || DEFAULT_FROM_PORT;
-      existing.toPort = normalizePortSide(toPort) || existing.toPort || DEFAULT_TO_PORT;
-      delete state.removedAutoEdges[edgeKey];
-      return;
-    }
-
-    delete state.removedAutoEdges[edgeKey];
-    draft.edges.push({
-      from: from,
-      to: to,
-      manual: true,
-      fromPort: normalizePortSide(fromPort) || DEFAULT_FROM_PORT,
-      toPort: normalizePortSide(toPort) || DEFAULT_TO_PORT
-    });
+    if (existing) return;
+    draft.edges.push({ from: from, to: to });
   }
 
   function syncDefaultEdges(targetDraft) {
@@ -1168,8 +1013,8 @@
     const sessions = findSingletonNodeId(draft, NODE_TYPES.SESSIONS);
 
     function addAutoEdge(from, to) {
-      if (!from || !to || isAutoEdgeSuppressed(from, to)) return;
-      addEdgeIfMissing(draft, from, to, false);
+      if (!from || !to) return;
+      addEdgeIfMissing(draft, from, to);
     }
 
     addAutoEdge(basics, reg);
@@ -1199,13 +1044,12 @@
     }
 
     if (type === NODE_TYPES.SESSION && !findSingletonNodeId(draft, NODE_TYPES.SESSIONS)) {
-      if (targetDraft === state.draft) setAlert('Drop a Sessions Container node before adding Session nodes.', true);
+      if (targetDraft === state.draft) setAlert('Add a Sessions Container node before adding Session nodes.', true);
       return null;
     }
 
     const definition = getNodeDefinition(type);
     const nodeId = makeNodeId(type);
-    const dropPoint = state.pendingDropPoint;
     const newNode = {
       id: nodeId,
       type: type,
@@ -1214,12 +1058,6 @@
       required: definition ? definition.required : false,
       order: draft.nodes.length + 1
     };
-
-    if (dropPoint && !isSessionChildType(type)) {
-      const origin = getGraphOrigin(draft);
-      newNode.x = dropPoint.x - (CANVAS_NODE_WIDTH / 2) + origin.x;
-      newNode.y = dropPoint.y - 24 + origin.y;
-    }
 
     draft.nodes.push(newNode);
     draft.payloadByNodeId[nodeId] = createNodePayload(type, nodeId, draft);
@@ -1230,8 +1068,7 @@
     }
 
     syncDefaultEdges(draft);
-    layoutAllNodes(draft);
-    state.pendingDropPoint = null;
+    syncGraphStructure(draft);
 
     if (shouldSelect !== false) state.selectedNodeId = nodeId;
     return nodeId;
@@ -1268,7 +1105,7 @@
     }
     if (state.selectedNodeId === nodeId) state.selectedNodeId = null;
     syncDefaultEdges();
-    layoutAllNodes(state.draft);
+    syncGraphStructure(state.draft);
     markDirty();
     updateTemplateGalleryVisibility();
     renderAll();
@@ -1292,7 +1129,7 @@
       }
     });
 
-    layoutAllNodes(state.draft);
+    syncGraphStructure(state.draft);
     state.selectedNodeId = newSessionId;
     markDirty();
     renderAll();
@@ -1309,7 +1146,7 @@
     next[targetIndex] = temp;
     state.draft.sessions = next;
     syncSessionIndex(state.draft);
-    layoutAllNodes(state.draft);
+    syncGraphStructure(state.draft);
     markDirty();
     renderAll();
   }
@@ -1631,12 +1468,15 @@
 
   function renderPalette() {
     DOM.palette.innerHTML = paletteItems.map(function (item) {
-      return `
-        <div class="event-palette-item" draggable="true" data-node-type="${item.type}">
-          <span class="event-palette-title">${escapeHtml(item.label)}</span>
-          <span class="event-palette-helper">${escapeHtml(item.helper)}</span>
-        </div>
-      `;
+      const isUsed = SINGLETON_TYPES.indexOf(item.type) > -1 && Boolean(findSingletonNodeId(state.draft, item.type));
+      const visual = getNodeVisual(item.type);
+      return `<button type="button" class="event-palette-item${isUsed ? ' is-used' : ''}" data-node-type="${item.type}"${isUsed ? ' disabled' : ''}>`
+        + `<span class="event-palette-tile event-canvas-tone-${visual.tone}" aria-hidden="true">${escapeHtml(visual.glyph)}</span>`
+        + '<span class="event-palette-copy">'
+        + `<span class="event-palette-title">${escapeHtml(item.label)}</span>`
+        + `<span class="event-palette-helper">${escapeHtml(isUsed ? 'Already on the canvas' : item.helper)}</span>`
+        + '</span>'
+        + '</button>';
     }).join('');
   }
 
@@ -1646,111 +1486,107 @@
     return Boolean(state.attemptedNodeIds[node.id]) || Boolean(state.draft.meta.validationAttempted);
   }
 
-  function renderCanvasPorts(nodeId) {
-    return PORT_SIDES.map(function (side) {
-      return `<span class="event-canvas-port event-canvas-port-${side}" data-port-side="${side}" data-node-id="${nodeId}" aria-hidden="true"></span>`;
-    }).join('');
-  }
-
-  function renderCanvasNode(node) {
+  function renderCanvasNode(entry) {
+    const node = entry.node;
     const status = nodeStatus(node);
     const isActive = state.selectedNodeId === node.id;
     const nodeLabel = cleanText(node.label);
+    const visual = getNodeVisual(node.type);
     const isChild = isSessionChildType(node.type);
-    const width = isChild ? CANVAS_CHILD_WIDTH : CANVAS_NODE_WIDTH;
-    const height = isChild ? CANVAS_CHILD_HEIGHT : CANVAS_NODE_HEIGHT;
+    const showError = nodeShowCanvasError(node);
+
     const removeButton = (node.type === NODE_TYPES.SESSION || isChild)
       ? ''
-      : `<button type="button" class="event-canvas-node-remove" data-action="remove-node" data-node-id="${node.id}" aria-label="Remove ${escapeHtml(nodeLabel)}">×</button>`;
+      : `<button type="button" class="event-canvas-node-remove" data-action="remove-node" data-node-id="${node.id}" aria-label="Remove ${escapeHtml(nodeLabel)}">\u00d7</button>`;
 
-    const groupClass = node.type === NODE_TYPES.SESSION
-      ? ' event-canvas-node-session'
-      : (isChild ? ' event-canvas-node-child' : '');
-    const errorClass = nodeShowCanvasError(node) ? ' event-canvas-node-has-error' : '';
-    const errorBadge = nodeShowCanvasError(node) ? '<span class="event-canvas-node-error-badge" aria-label="Needs attention">!</span>' : '';
+    const classNames = ['event-canvas-node'];
+    if (node.type === NODE_TYPES.SESSION) classNames.push('event-canvas-node-session');
+    if (isChild) classNames.push('event-canvas-node-child');
+    if (showError) classNames.push('event-canvas-node-has-error');
+    if (isActive) classNames.push('is-active');
 
-    const display = toDisplayCoord(node.x, node.y);
-    return `<div class="event-canvas-node${groupClass}${errorClass}${isActive ? ' is-active' : ''}" data-node-id="${node.id}" role="button" tabindex="0" style="left:${display.x}px;top:${display.y}px;width:${width}px;min-height:${height}px">${renderCanvasPorts(node.id)}${removeButton}${errorBadge}<span class="event-canvas-node-copy"><span class="event-canvas-node-head"><span class="event-canvas-node-title">${escapeHtml(nodeLabel)}</span><span class="event-status ${statusClass(status)}">${escapeHtml(status)}</span></span></span></div>`;
+    const errorBadge = showError
+      ? '<span class="event-canvas-node-error-badge" aria-label="Needs attention">!</span>'
+      : '';
+
+    return `<div class="${classNames.join(' ')}" data-node-id="${node.id}" role="button" tabindex="0" aria-pressed="${isActive}" style="left:${entry.x}px;top:${entry.y}px;width:${entry.width}px;height:${entry.height}px">`
+      + removeButton
+      + errorBadge
+      + `<span class="event-canvas-node-tile event-canvas-tone-${visual.tone}" aria-hidden="true">${escapeHtml(visual.glyph)}</span>`
+      + '<span class="event-canvas-node-copy">'
+      + `<span class="event-canvas-node-title">${escapeHtml(nodeLabel)}</span>`
+      + '<span class="event-canvas-node-meta">'
+      + `<span class="event-canvas-node-kind">${escapeHtml(visual.kind)}</span>`
+      + `<span class="event-status ${statusClass(status)}">${escapeHtml(status)}</span>`
+      + '</span>'
+      + '</span>'
+      + '</div>';
   }
 
-  function renderSessionGroupsMarkup() {
-    return state.draft.sessions.map(function (sessionId) {
-      const sessionNode = state.draft.nodes.find(function (node) { return node.id === sessionId; });
-      if (!sessionNode) return '';
-      const childNodes = getSessionChildNodes(state.draft, sessionId);
-      const origin = getGraphOrigin(state.draft);
-      const xs = [sessionNode.x || 0].concat(childNodes.map(function (node) { return node.x || 0; }));
-      const ys = [sessionNode.y || 0].concat(childNodes.map(function (node) { return node.y || 0; }));
-      const minX = Math.min.apply(null, xs) - 16 - origin.x;
-      const minY = Math.min.apply(null, ys) - 16 - origin.y;
-      const maxX = Math.max.apply(null, xs) + CANVAS_NODE_WIDTH + 16 - origin.x;
-      const maxY = Math.max.apply(null, ys) + (childNodes.length * 72) + 16 - origin.y;
-      return `<div class="event-canvas-session-group" style="left:${minX}px;top:${minY}px;width:${maxX - minX}px;height:${maxY - minY}px" aria-hidden="true"></div>`;
+  function renderCanvasTerminal(entry) {
+    return `<div class="event-canvas-terminal" style="left:${entry.x}px;top:${entry.y}px;width:${entry.width}px;height:${entry.height}px">${escapeHtml(entry.label)}</div>`;
+  }
+
+  function renderCanvasConnectors(layout) {
+    const defs = '<defs><marker id="event-canvas-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 8 4 L 0 8 z" fill="rgba(51, 78, 92, 0.38)"></path></marker></defs>';
+    const paths = layout.connectors.map(function (connector) {
+      const marker = connector.kind === 'stub' ? '' : ' marker-end="url(#event-canvas-arrow)"';
+      return `<path class="event-canvas-edge-path is-${connector.kind}" d="${connector.d}"${marker}></path>`;
+    }).join('');
+
+    return `<svg class="event-canvas-edges" width="${layout.width}" height="${layout.height}" viewBox="0 0 ${layout.width} ${layout.height}" aria-hidden="true">${defs}${paths}</svg>`;
+  }
+
+  function renderBranchLabels(layout) {
+    return layout.branchLabels.map(function (label) {
+      return `<span class="event-canvas-branch-label" style="left:${label.x}px;top:${label.y}px" aria-hidden="true">${escapeHtml(label.text)}</span>`;
     }).join('');
   }
 
-  function getCanvasEmptyMessage() {
-    if (DOM.templateGallery && !DOM.templateGallery.classList.contains('is-hidden')) {
-      return 'Choose a template above or drop nodes here to begin.';
-    }
-    return 'Drop nodes from the palette to begin building your event.';
+  function renderInsertMenu(insert) {
+    const options = insert.types.map(function (type) {
+      const definition = getNodeDefinition(type) || { label: type, helper: '' };
+      return `<button type="button" class="event-canvas-insert-option" data-insert-type="${type}" data-insert-key="${insert.key}">`
+        + `<span class="event-canvas-insert-option-title">${escapeHtml(definition.label)}</span>`
+        + `<span class="event-canvas-insert-option-helper">${escapeHtml(definition.helper)}</span>`
+        + '</button>';
+    }).join('');
+    return `<div class="event-canvas-insert-menu" role="menu">${options}</div>`;
+  }
+
+  function renderCanvasInserts(layout) {
+    return layout.inserts.map(function (insert) {
+      const isOpen = state.openInsertKey === insert.key;
+      const singleType = insert.types.length === 1 ? getNodeDefinition(insert.types[0]) : null;
+      const description = singleType ? `Add ${cleanText(singleType.label)}` : 'Add a node here';
+      return `<div class="event-canvas-insert${isOpen ? ' is-open' : ''}" style="left:${insert.x}px;top:${insert.y}px">`
+        + `<button type="button" class="event-canvas-insert-button" data-insert-toggle="${insert.key}" aria-label="${escapeHtml(description)}" title="${escapeHtml(description)}" aria-expanded="${isOpen}">+</button>`
+        + (isOpen ? renderInsertMenu(insert) : '')
+        + '</div>';
+    }).join('');
   }
 
   function renderCanvas() {
-    if (!state.draft.nodes.length) {
-      DOM.canvas.innerHTML = `<p class="event-admin-canvas-empty">${getCanvasEmptyMessage()}</p>`;
-      return;
-    }
+    if (!state.draft) return;
 
-    layoutAllNodes(state.draft);
-    const graphWidth = state.draft.meta.graphWidth || 960;
-    const graphHeight = state.draft.meta.graphHeight || 720;
-    const nodesMarkup = state.draft.nodes.map(renderCanvasNode).join('');
+    const layout = buildLayoutTree(state.draft);
+    state.layout = layout;
+    state.draft.meta.graphWidth = layout.width;
+    state.draft.meta.graphHeight = layout.height;
 
-    DOM.canvas.innerHTML = `<div class="event-canvas-viewport" id="event-canvas-viewport"><div class="event-canvas-graph" id="event-canvas-graph" style="width:${graphWidth}px;height:${graphHeight}px"><svg class="event-canvas-edges" id="event-canvas-edges" aria-hidden="true"></svg>${renderSessionGroupsMarkup()}<div class="event-canvas-node-layer">${nodesMarkup}</div></div></div>`;
+    const nodesMarkup = layout.entries.map(function (entry) {
+      return entry.isTerminal ? renderCanvasTerminal(entry) : renderCanvasNode(entry);
+    }).join('');
+
+    DOM.canvas.innerHTML = '<div class="event-canvas-viewport" id="event-canvas-viewport">'
+      + `<div class="event-canvas-graph" id="event-canvas-graph" style="width:${layout.width}px;height:${layout.height}px">`
+      + renderCanvasConnectors(layout)
+      + renderBranchLabels(layout)
+      + `<div class="event-canvas-node-layer">${nodesMarkup}</div>`
+      + `<div class="event-canvas-insert-layer">${renderCanvasInserts(layout)}</div>`
+      + '</div></div>';
 
     applyCanvasTransform();
-    window.requestAnimationFrame(drawCanvasEdges);
-  }
-
-  function drawCanvasEdges() {
-    const graph = DOM.canvas.querySelector('#event-canvas-graph');
-    const svg = DOM.canvas.querySelector('#event-canvas-edges');
-    if (!graph || !svg || !state.draft) return;
-
-    const width = Math.max(1, graph.clientWidth);
-    const height = Math.max(1, graph.clientHeight);
-    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
-    svg.setAttribute('width', String(width));
-    svg.setAttribute('height', String(height));
-
-    let defs = '<defs><marker id="event-canvas-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 8 4 L 0 8 z" fill="rgba(51, 78, 92, 0.4)"></path></marker></defs>';
-    let paths = '';
-
-    state.draft.edges.forEach(function (edge) {
-      const fromNode = state.draft.nodes.find(function (node) { return node.id === edge.from; });
-      const toNode = state.draft.nodes.find(function (node) { return node.id === edge.to; });
-      if (!fromNode || !toNode) return;
-
-      const ports = resolveEdgePorts(edge, fromNode, toNode);
-      const start = getNodePortPoint(fromNode, ports.fromPort);
-      const end = getNodePortPoint(toNode, ports.toPort);
-      const edgeKey = getEdgeKey(edge);
-      const isSelected = state.selectedEdgeKey === edgeKey;
-      const edgeClass = `${edge.manual ? 'event-canvas-edge-path is-manual' : 'event-canvas-edge-path'}${isSelected ? ' is-selected' : ''}`;
-      const d = buildEdgePath(start.x, start.y, ports.fromPort, end.x, end.y, ports.toPort);
-      paths += `<path class="${edgeClass}" data-edge-from="${edge.from}" data-edge-to="${edge.to}" d="${d}" marker-end="url(#event-canvas-arrow)"></path>`;
-    });
-
-    if (state.edgeDrag) {
-      const fromNode = state.draft.nodes.find(function (node) { return node.id === state.edgeDrag.fromNodeId; });
-      if (fromNode) {
-        const start = getNodePortPoint(fromNode, state.edgeDrag.fromPort);
-        paths += `<path class="event-canvas-edge-path is-preview" d="M ${start.x} ${start.y} L ${state.edgeDrag.currentX} ${state.edgeDrag.currentY}"></path>`;
-      }
-    }
-
-    svg.innerHTML = defs + paths;
   }
 
   function renderSummary() {
@@ -1910,10 +1746,6 @@
     } else if (state.isInitialized && state.draft && !state.draft.meta.templateChosen && !state.draft.nodes.length) {
       showTemplateGallery();
     }
-
-    window.requestAnimationFrame(function () {
-      if (state.isInitialized) drawCanvasEdges();
-    });
   }
 
   function renderBasicsForm(node, validation) {
@@ -2597,8 +2429,7 @@
       node.type = cleanText(node.type);
     });
     state.draft = draft;
-    state.removedAutoEdges = draft.meta.removedAutoEdges || {};
-    state.selectedEdgeKey = null;
+    state.openInsertKey = null;
     state.selectedNodeId = (function () {
       const preferred = draft.nodes.find(function (node) { return !isSessionChildType(node.type); });
       if (preferred) return preferred.id;
@@ -2635,7 +2466,6 @@
     const shouldReset = window.confirm('Reset current draft to a blank event? This cannot be undone.');
     if (!shouldReset) return;
     loadDraft(createDraft());
-    state.removedAutoEdges = {};
     saveDraft(false);
     showTemplateGallery();
     resetCanvasView();
@@ -2733,89 +2563,52 @@
     DOM.canvas.focus();
   });
 
-  DOM.palette.addEventListener('dragstart', function (event) {
+  DOM.palette.addEventListener('click', function (event) {
     const item = event.target.closest('[data-node-type]');
-    if (!item) return;
-    event.dataTransfer.setData('text/event-node-type', item.dataset.nodeType);
-    event.dataTransfer.effectAllowed = 'copy';
-  });
-
-  DOM.canvas.addEventListener('dragover', function (event) {
-    event.preventDefault();
-    DOM.canvas.classList.add('is-drop-target');
-  });
-
-  DOM.canvas.addEventListener('dragleave', function () {
-    DOM.canvas.classList.remove('is-drop-target');
-  });
-
-  DOM.canvas.addEventListener('drop', function (event) {
-    event.preventDefault();
-    DOM.canvas.classList.remove('is-drop-target');
-    const type = event.dataTransfer.getData('text/event-node-type');
-    if (!type) return;
-    state.pendingDropPoint = getCanvasPointFromEvent(event);
-    addNodeByType(state.draft, type, true);
+    if (!item || !state.draft) return;
+    const created = addNodeByType(state.draft, item.dataset.nodeType, true);
+    if (!created) {
+      renderAll();
+      return;
+    }
     markDirty();
     updateTemplateGalleryVisibility();
     renderAll();
   });
 
   DOM.canvas.addEventListener('mousedown', function (event) {
-    const port = event.target.closest('.event-canvas-port');
-    if (port) {
+    if (event.button !== 0) return;
+    if (event.target.closest('.event-canvas-insert')) return;
+
+    const overEmptyGraph = event.target.classList.contains('event-canvas-graph')
+      || event.target.classList.contains('event-canvas-viewport')
+      || event.target === DOM.canvas;
+
+    if (state.spacePanActive || event.altKey || overEmptyGraph) {
       event.preventDefault();
-      startEdgeDrag(port.dataset.nodeId, port.dataset.portSide, event);
-      return;
-    }
-
-    if (state.spacePanActive && event.button === 0) {
-      event.preventDefault();
-      startPanDrag(event);
-      return;
-    }
-
-    const node = event.target.closest('.event-canvas-node[data-node-id]');
-    if (node && !event.target.closest('.event-canvas-node-remove') && !event.target.closest('.event-canvas-port')) {
-      startNodeDrag(node.dataset.nodeId, event);
-      return;
-    }
-
-    if (event.target.closest('#event-canvas-graph') && event.button === 0 && (event.altKey || event.target.classList.contains('event-canvas-graph'))) {
       startPanDrag(event);
     }
   });
 
-  function handleCanvasMouseUp(event) {
-    if (state.nodeDrag) finishNodeDrag();
+  function handleCanvasMouseUp() {
     if (state.panDrag) finishPanDrag();
-    if (state.edgeDrag) {
-      const targetPort = event.target.closest('.event-canvas-port');
-      finishEdgeDrag(
-        targetPort ? targetPort.dataset.nodeId : null,
-        targetPort ? targetPort.dataset.portSide : null,
-        event
-      );
-    }
   }
 
   DOM.canvas.addEventListener('mouseup', handleCanvasMouseUp);
   document.addEventListener('mouseup', function (event) {
-    if (!state.nodeDrag && !state.edgeDrag) return;
+    if (!state.panDrag) return;
     if (DOM.canvas.contains(event.target)) return;
-    handleCanvasMouseUp(event);
+    handleCanvasMouseUp();
   });
 
   DOM.canvas.addEventListener('mousemove', function (event) {
-    if (state.nodeDrag) moveNodeDrag(event);
-    if (state.edgeDrag) moveEdgeDrag(event);
     if (state.panDrag) movePanDrag(event);
   });
 
   document.addEventListener('mousemove', function (event) {
-    if (!state.nodeDrag || !state.nodeDrag.isDragging) return;
+    if (!state.panDrag) return;
     if (DOM.canvas.contains(event.target)) return;
-    moveNodeDrag(event);
+    movePanDrag(event);
   });
 
   DOM.canvas.addEventListener('wheel', function (event) {
@@ -2833,35 +2626,80 @@
     }
 
     applyCanvasTransform();
-    drawCanvasEdges();
   }, { passive: false });
 
-  DOM.canvas.addEventListener('click', function (event) {
-    const edgePath = event.target.closest('.event-canvas-edge-path');
-    if (edgePath && !edgePath.classList.contains('is-preview')) {
-      state.selectedEdgeKey = `${edgePath.getAttribute('data-edge-from')}->${edgePath.getAttribute('data-edge-to')}`;
-      state.selectedNodeId = null;
-      clearAlert();
+  function insertNodeOfType(type) {
+    state.openInsertKey = null;
+    const created = addNodeByType(state.draft, type, true);
+    if (!created) {
       renderAll();
+      return;
+    }
+    markDirty();
+    updateTemplateGalleryVisibility();
+    renderAll();
+  }
+
+  DOM.canvas.addEventListener('click', function (event) {
+    const option = event.target.closest('[data-insert-type]');
+    if (option) {
+      insertNodeOfType(option.dataset.insertType);
+      return;
+    }
+
+    const toggle = event.target.closest('[data-insert-toggle]');
+    if (toggle) {
+      const key = toggle.dataset.insertToggle;
+      const insert = state.layout
+        ? state.layout.inserts.find(function (item) { return item.key === key; })
+        : null;
+
+      // A slot with a single eligible type has nothing to disambiguate.
+      if (insert && insert.types.length === 1) {
+        insertNodeOfType(insert.types[0]);
+        return;
+      }
+
+      state.openInsertKey = state.openInsertKey === key ? null : key;
+      renderCanvas();
       return;
     }
 
     const action = event.target.closest('[data-action]');
     if (action && action.dataset.action === 'remove-node') {
+      state.openInsertKey = null;
       removeNode(action.dataset.nodeId);
       return;
     }
 
     const node = event.target.closest('.event-canvas-node[data-node-id]');
-    if (!node) {
-      state.selectedEdgeKey = null;
+    if (node) {
+      selectCanvasNode(node.dataset.nodeId);
+      return;
+    }
+
+    if (state.openInsertKey) {
+      state.openInsertKey = null;
+      renderCanvas();
     }
   });
 
-  DOM.canvas.addEventListener('scroll', function () {
-    if (!state.isInitialized) return;
-    drawCanvasEdges();
+  DOM.canvas.addEventListener('keydown', function (event) {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    const node = event.target.closest('.event-canvas-node[data-node-id]');
+    if (!node) return;
+    event.preventDefault();
+    selectCanvasNode(node.dataset.nodeId);
   });
+
+  // Capture phase: the canvas click handler re-renders and detaches event.target,
+  // which would make a bubble-phase containment check report a false "outside".
+  document.addEventListener('click', function (event) {
+    if (!state.openInsertKey) return;
+    if (DOM.canvas.contains(event.target)) return;
+    state.openInsertKey = null;
+    renderCanvas();
+  }, true);
 
   DOM.form.addEventListener('submit', function (event) { event.preventDefault(); });
   DOM.form.addEventListener('change', function (event) { updateSelectedNode(event.target); });
@@ -2921,15 +2759,15 @@
       return;
     }
 
-    if (event.key === 'Delete' && state.isInitialized) {
-      if (state.selectedEdgeKey) {
-        removeEdgeByKey(state.selectedEdgeKey);
-        return;
-      }
-      if (state.selectedNodeId) {
-        const selected = getNodeById(state.selectedNodeId);
-        if (selected && !isSessionChildType(selected.type)) removeNode(state.selectedNodeId);
-      }
+    if (event.key === 'Escape' && state.openInsertKey) {
+      state.openInsertKey = null;
+      renderCanvas();
+      return;
+    }
+
+    if (event.key === 'Delete' && state.isInitialized && state.selectedNodeId) {
+      const selected = getNodeById(state.selectedNodeId);
+      if (selected && !isSessionChildType(selected.type)) removeNode(state.selectedNodeId);
     }
   });
 
@@ -2946,10 +2784,6 @@
   DOM.zoomResetButton && DOM.zoomResetButton.addEventListener('click', resetCanvasView);
   DOM.fitGraphButton && DOM.fitGraphButton.addEventListener('click', fitCanvasToGraph);
 
-  window.addEventListener('resize', function () {
-    if (!state.isInitialized) return;
-    drawCanvasEdges();
-  });
 
   window.ArcticEventAdmin = {
     openWorkspace: openWorkspace,
