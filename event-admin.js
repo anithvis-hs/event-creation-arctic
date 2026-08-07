@@ -17,6 +17,9 @@
   // able to zoom out further than the old free-form canvas did.
   const CANVAS_MIN_ZOOM = 0.25;
   const CANVAS_MAX_ZOOM = 1.6;
+  // Below roughly this scale the node titles and status chips stop being
+  // readable, so intro framing never zooms out past it.
+  const CANVAS_INTRO_MIN_ZOOM = 0.7;
   const STATUS = {
     NOT_STARTED: 'Not started',
     IN_PROGRESS: 'In progress',
@@ -149,7 +152,8 @@
     panDrag: null,
     spacePanActive: false,
     layout: null,
-    openInsertKey: null
+    openInsertKey: null,
+    aiChangedNodeIds: {}
   };
 
   let toastTimeoutId = null;
@@ -333,6 +337,88 @@
     return draft;
   }
 
+  // Seeded from the chat-proposed rollout plan. AMER and EMEA deliberately share
+  // Maya Lin on overlapping times so computeConflicts reports a genuine blocker
+  // the assistant can then resolve; APAC is clean.
+  function createMethodologyRolloutDraft() {
+    const draft = createDraft({ id: 'event-plan-methodology-rollout' });
+    const basicsId = addNodeByType(draft, NODE_TYPES.BASICS, false);
+    const regId = addNodeByType(draft, NODE_TYPES.REGISTRATION, false);
+    const instructorId = addNodeByType(draft, NODE_TYPES.INSTRUCTORS, false);
+    const sessionsId = addNodeByType(draft, NODE_TYPES.SESSIONS, false);
+    const amerId = addNodeByType(draft, NODE_TYPES.SESSION, false);
+    const emeaId = addNodeByType(draft, NODE_TYPES.SESSION, false);
+    const apacId = addNodeByType(draft, NODE_TYPES.SESSION, false);
+
+    draft.payloadByNodeId[basicsId] = {
+      title: 'Sales Methodology Certification 2026',
+      description: 'Regional certification program for 412 reps ahead of the Q1 deadline.',
+      spot: 'Enterprise Hub'
+    };
+    draft.payloadByNodeId[regId] = { modes: ['approval-required', 'attendance-tracked'] };
+    draft.payloadByNodeId[instructorId] = { entries: ['Maya Lin', 'maya@example.com', 'Sam Patel'] };
+    draft.payloadByNodeId[sessionsId] = { sessionIds: [amerId, emeaId, apacId] };
+    draft.payloadByNodeId[amerId] = { title: 'AMER Certification' };
+    draft.payloadByNodeId[emeaId] = { title: 'EMEA Certification' };
+    draft.payloadByNodeId[apacId] = { title: 'APAC Certification' };
+
+    seedSessionBranchData(draft, amerId, {
+      title: 'AMER Certification',
+      summary: 'Certification track for North and South America.',
+      track: 'AMER',
+      date: '2026-03-12',
+      startTime: '09:00',
+      endTime: '11:00',
+      timezone: 'America/Los_Angeles',
+      venueMode: 'physical',
+      location: 'Enterprise Hub — Main Hall',
+      capacity: '180',
+      waitlist: 'enabled',
+      instructors: ['Maya Lin', 'maya@example.com']
+    });
+    seedSessionBranchData(draft, emeaId, {
+      title: 'EMEA Certification',
+      summary: 'Certification track for Europe, Middle East, and Africa.',
+      track: 'EMEA',
+      date: '2026-03-12',
+      startTime: '10:00',
+      endTime: '12:00',
+      timezone: 'Europe/London',
+      venueMode: 'virtual',
+      virtualLink: 'https://meet.example.com/methodology-emea',
+      capacity: '150',
+      waitlist: 'enabled',
+      // Name only: the conflict engine matches on raw entries, so repeating the
+      // email here would report the same person as two separate collisions.
+      instructors: ['Maya Lin']
+    });
+    seedSessionBranchData(draft, apacId, {
+      title: 'APAC Certification',
+      summary: 'Certification track for Asia Pacific.',
+      track: 'APAC',
+      date: '2026-03-13',
+      startTime: '09:00',
+      endTime: '11:00',
+      timezone: 'Asia/Singapore',
+      venueMode: 'virtual',
+      virtualLink: 'https://meet.example.com/methodology-apac',
+      capacity: '82',
+      waitlist: 'disabled',
+      instructors: ['Sam Patel', 'sam@example.com']
+    });
+
+    draft.meta.templateChosen = true;
+    syncGraphStructure(draft);
+    return draft;
+  }
+
+  const EVENT_PLANS = {
+    'methodology-rollout': {
+      label: 'Sales Methodology Certification',
+      createDraft: createMethodologyRolloutDraft
+    }
+  };
+
   const EVENT_TEMPLATES = [
     {
       id: 'sales-kickoff',
@@ -407,6 +493,9 @@
     if (host) host.remove();
   }
 
+  // The host is a body child so it can sit above the modals and stay put when
+  // the builder is hidden, for example right after publishing closes it. Its
+  // position comes entirely from .event-admin-toast-host in the stylesheet.
   function getToastHost() {
     let host = document.querySelector('.event-admin-toast-host');
     if (!host) {
@@ -972,6 +1061,23 @@
     applyCanvasTransform();
   }
 
+  // Framing used right after an assistant build. Fitting the whole graph drops
+  // below the point where node labels and status chips can be read, and the
+  // information here is horizontal anyway: parallel branches side by side. So
+  // fit the width, keep the scale legible, and let branch depth run off the
+  // bottom as an invitation to scroll.
+  function frameGraphForIntro() {
+    if (!state.draft || !state.layout) return;
+    const padding = 32;
+    const graphWidth = state.layout.width;
+    const viewWidth = Math.max(1, DOM.canvas.clientWidth);
+    const scale = Math.max(CANVAS_INTRO_MIN_ZOOM, Math.min(1, (viewWidth - (padding * 2)) / graphWidth));
+    state.canvasView.scale = scale;
+    state.canvasView.panX = Math.max(0, (viewWidth - (graphWidth * scale)) / 2);
+    state.canvasView.panY = 0;
+    applyCanvasTransform();
+  }
+
   function setSpacePanActive(isActive) {
     state.spacePanActive = isActive;
     DOM.canvas.classList.toggle('is-space-pan', isActive);
@@ -1363,7 +1469,8 @@
             type: 'error',
             message: `Venue collision: "${leftVenue.location}" is double-booked.`,
             nodeId: venueNode ? venueNode.id : null,
-            sessionId: leftId
+            sessionId: leftId,
+            counterpartSessionId: rightId
           });
         }
 
@@ -1376,7 +1483,8 @@
               type: 'error',
               message: `Instructor "${leftEntry}" is double-booked across overlapping sessions.`,
               nodeId: instructorNode ? instructorNode.id : null,
-              sessionId: leftId
+              sessionId: leftId,
+              counterpartSessionId: rightId
             });
           }
         });
@@ -1385,6 +1493,89 @@
 
     draft.conflicts = conflicts;
     return conflicts;
+  }
+
+  const RESCHEDULE_BUFFER_MINUTES = 15;
+
+  function parseClockMinutes(value) {
+    const match = /^(\d{1,2}):(\d{2})$/.exec(value || '');
+    if (!match) return null;
+    return (Number(match[1]) * 60) + Number(match[2]);
+  }
+
+  function formatClockMinutes(totalMinutes) {
+    const clamped = Math.max(0, Math.min(totalMinutes, (24 * 60) - 1));
+    const hours = String(Math.floor(clamped / 60)).padStart(2, '0');
+    const minutes = String(clamped % 60).padStart(2, '0');
+    return `${hours}:${minutes}`;
+  }
+
+  function getSessionTitle(sessionId, draft) {
+    const basics = getSessionBasicsPayload(sessionId, draft || state.draft);
+    if (hasText(basics.title)) return basics.title.trim();
+    const sessionNode = (draft || state.draft).nodes.find(function (node) { return node.id === sessionId; });
+    return sessionNode ? cleanText(sessionNode.label) : 'Session';
+  }
+
+  // Moves whichever of the two overlapping sessions starts later so it begins
+  // after the other one ends. Derived from the conflict rather than scripted, so
+  // it works for any overlap the engine reports.
+  function resolveConflict(index) {
+    if (!state.draft) return null;
+
+    const conflict = (state.draft.conflicts || [])[index];
+    if (!conflict || !conflict.sessionId || !conflict.counterpartSessionId) return null;
+
+    const leftSchedule = getSessionSchedulePayload(conflict.sessionId);
+    const rightSchedule = getSessionSchedulePayload(conflict.counterpartSessionId);
+    const leftStart = parseClockMinutes(leftSchedule.startTime);
+    const rightStart = parseClockMinutes(rightSchedule.startTime);
+    if (leftStart === null || rightStart === null) return null;
+
+    const movesRight = rightStart >= leftStart;
+    const moveSessionId = movesRight ? conflict.counterpartSessionId : conflict.sessionId;
+    const anchorSchedule = movesRight ? leftSchedule : rightSchedule;
+    const moveSchedule = movesRight ? rightSchedule : leftSchedule;
+
+    const anchorEnd = parseClockMinutes(anchorSchedule.endTime);
+    const moveStart = parseClockMinutes(moveSchedule.startTime);
+    const moveEnd = parseClockMinutes(moveSchedule.endTime);
+    if (anchorEnd === null || moveStart === null || moveEnd === null) return null;
+
+    const duration = moveEnd - moveStart;
+    const nextStart = anchorEnd + RESCHEDULE_BUFFER_MINUTES;
+    const previousWindow = `${moveSchedule.startTime}\u2013${moveSchedule.endTime}`;
+    moveSchedule.startTime = formatClockMinutes(nextStart);
+    moveSchedule.endTime = formatClockMinutes(nextStart + duration);
+
+    const scheduleNode = getSessionChildNodes(state.draft, moveSessionId).find(function (node) {
+      return node.type === NODE_TYPES.SESSION_SCHEDULE;
+    });
+
+    markDirty();
+    computeConflicts(state.draft);
+
+    if (scheduleNode) {
+      state.selectedNodeId = scheduleNode.id;
+      flagAiChangedNode(scheduleNode.id);
+    }
+
+    renderAll();
+
+    return {
+      sessionTitle: getSessionTitle(moveSessionId),
+      previousWindow: previousWindow,
+      nextWindow: `${moveSchedule.startTime}\u2013${moveSchedule.endTime}`,
+      timezone: moveSchedule.timezone || '',
+      remainingConflicts: (state.draft.conflicts || []).length
+    };
+  }
+
+  function flagAiChangedNode(nodeId) {
+    state.aiChangedNodeIds[nodeId] = true;
+    window.setTimeout(function () {
+      delete state.aiChangedNodeIds[nodeId];
+    }, 1200);
   }
 
   function makeChecklistItem(severity, message, nodeId, sessionId) {
@@ -1504,6 +1695,7 @@
     if (isChild) classNames.push('event-canvas-node-child');
     if (showError) classNames.push('event-canvas-node-has-error');
     if (isActive) classNames.push('is-active');
+    if (state.aiChangedNodeIds[node.id]) classNames.push('is-ai-changed');
 
     const errorBadge = showError
       ? '<span class="event-canvas-node-error-badge" aria-label="Needs attention">!</span>'
@@ -1697,6 +1889,80 @@
     return true;
   }
 
+  function buildFromPlan(planId, options) {
+    const opts = options || {};
+    const plan = EVENT_PLANS[planId];
+
+    if (!plan) {
+      setAlert('Unknown plan. Starting with a blank draft.', true);
+      loadDraft(createDraft());
+      showTemplateGallery();
+      return false;
+    }
+
+    if (!opts.skipConfirm && !confirmReplaceDraft('You have unvalidated changes. Build this plan anyway?')) {
+      return false;
+    }
+
+    const draft = plan.createDraft();
+    draft.meta.planId = planId;
+    loadDraft(draft);
+
+    // Open on the sessions rail rather than the default first node: it lists
+    // every branch and renders the cross-session checks, which is what the
+    // assistant is talking about the moment the build lands.
+    const sessionsId = findSingletonNodeId(state.draft, NODE_TYPES.SESSIONS);
+    if (sessionsId) {
+      state.selectedNodeId = sessionsId;
+      renderAll();
+    }
+
+    saveDraft(false);
+    hideTemplateGallery();
+    frameGraphForIntro();
+    showToast(`${plan.label} built on the canvas.`, 4000);
+    return true;
+  }
+
+  // Conflicts carry node ids, which chat cannot read. Resolve the session titles
+  // here so the assistant can describe the conflict in the admin's language.
+  function getConflicts() {
+    if (!state.draft) return [];
+    return (state.draft.conflicts || []).map(function (conflict) {
+      return {
+        type: conflict.type,
+        message: conflict.message,
+        sessionTitle: conflict.sessionId ? getSessionTitle(conflict.sessionId) : '',
+        counterpartTitle: conflict.counterpartSessionId ? getSessionTitle(conflict.counterpartSessionId) : '',
+        isResolvable: Boolean(conflict.sessionId && conflict.counterpartSessionId)
+      };
+    });
+  }
+
+  function getProgramSummary() {
+    if (!state.draft) return null;
+
+    const sessions = state.draft.sessions || [];
+    const instructors = {};
+    sessions.forEach(function (sessionId) {
+      (getSessionInstructorsPayload(sessionId).entries || []).forEach(function (entry) {
+        if (hasText(entry) && !isEmail(entry)) instructors[entry.trim()] = true;
+      });
+    });
+
+    const basicsId = findSingletonNodeId(state.draft, NODE_TYPES.BASICS);
+    const basicsPayload = basicsId ? (state.draft.payloadByNodeId[basicsId] || {}) : {};
+    const conflicts = state.draft.conflicts || [];
+
+    return {
+      title: basicsPayload.title || '',
+      sessionCount: sessions.length,
+      instructorCount: Object.keys(instructors).length,
+      conflictCount: conflicts.length,
+      blockerCount: conflicts.filter(function (item) { return item.type === 'error'; }).length
+    };
+  }
+
   function startBlankFromGallery() {
     if (!confirmReplaceDraft('You have unvalidated changes. Start a blank canvas anyway?')) return;
     const draft = createDraft();
@@ -1739,7 +2005,9 @@
   function openWorkspace(options) {
     const opts = options || {};
 
-    if (opts.template) {
+    if (opts.plan) {
+      buildFromPlan(opts.plan, { skipConfirm: Boolean(opts.skipConfirm) });
+    } else if (opts.template) {
       loadTemplateDraft(opts.template, { skipConfirm: Boolean(opts.skipConfirm) });
     } else if (opts.basicsTitle) {
       openScratchWithBasics(opts.basicsTitle, { skipConfirm: opts.skipConfirm });
@@ -2379,11 +2647,14 @@
       const summaryHost = document.getElementById('workspace-event-saved-summary');
       if (!summaryHost) return;
 
+      const program = getProgramSummary() || { sessionCount: 0, instructorCount: 0, conflictCount: 0 };
+
       summaryHost.innerHTML = `
         <h2>Event published</h2>
         <p class="event-helper">${escapeHtml(basicsPayload.title || 'Untitled event')} · ${state.draft.sessions.length} session branch(es) · Live in prototype.</p>
         <ul>
-          <li>Template: ${escapeHtml(state.draft.meta.templateId || 'Blank canvas')}</li>
+          <li>${program.sessionCount} session branch(es), ${program.instructorCount} instructor(s), ${program.conflictCount} unresolved conflict(s)</li>
+          <li>Template: ${escapeHtml(state.draft.meta.templateId || state.draft.meta.planId || 'Blank canvas')}</li>
           <li>Published at ${publishedAt}</li>
           ${warningNote}
         </ul>
@@ -2784,14 +3055,17 @@
   DOM.zoomResetButton && DOM.zoomResetButton.addEventListener('click', resetCanvasView);
   DOM.fitGraphButton && DOM.fitGraphButton.addEventListener('click', fitCanvasToGraph);
 
-
   window.ArcticEventAdmin = {
     openWorkspace: openWorkspace,
     saveDraftLocal: saveDraftLocal,
     openPublishReview: openPublishReview,
     publishEvent: publishEvent,
     validateAndSave: validateAndSave,
-    loadTemplateDraft: loadTemplateDraft
+    loadTemplateDraft: loadTemplateDraft,
+    buildFromPlan: buildFromPlan,
+    getConflicts: getConflicts,
+    resolveConflict: resolveConflict,
+    getProgramSummary: getProgramSummary
   };
 
   initializeEditor();

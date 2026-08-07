@@ -22,6 +22,7 @@
   const workspaceDefaultView = document.getElementById('workspace-default-view');
   const workspaceEventView = document.getElementById('workspace-event-view');
   const eventsWorkspaceButton = document.getElementById('events-workspace-button');
+  const draftProgramButton = document.getElementById('draft-program-button');
   const newChatBtn = document.getElementById('new-chat-button');
   const chatListBtn = document.getElementById('chat-list-button');
   const chatListIcon = chatListBtn ? chatListBtn.querySelector('.icon-img') : null;
@@ -45,6 +46,35 @@
   let shouldAutoScrollToBottom = true;
 
   const demoChats = {
+    'methodology-rollout': {
+      title: 'Sales Methodology certification rollout',
+      messages: [
+        {
+          type: 'user',
+          text: '412 reps across AMER, EMEA, and APAC need Sales Methodology certification before March 31. Help me set up the program.'
+        },
+        {
+          type: 'ai',
+          intro: 'Three regions means three parallel session branches rather than one long agenda. I split capacity by regional headcount, set each session in its local timezone, and turned on approval and attendance tracking because this is a certification.',
+          heading: 'Proposed structure',
+          details: [
+            'Capacity is split 180 / 150 / 82 to match regional headcount, so no single region is oversubscribed.',
+            'AMER and EMEA both run on March 12 and APAC on March 13, which keeps the whole rollout inside one week and well ahead of the March 31 deadline.'
+          ],
+          structure: {
+            spine: ['Basics', 'Registration', 'Instructors', 'Sessions'],
+            branches: [
+              { label: 'AMER', detail: '180 seats, Mar 12, America/Los_Angeles' },
+              { label: 'EMEA', detail: '150 seats, Mar 12, Europe/London' },
+              { label: 'APAC', detail: '82 seats, Mar 13, Asia/Singapore' }
+            ]
+          },
+          actions: [
+            { label: 'Build this on the canvas', buildPlan: 'methodology-rollout' }
+          ]
+        }
+      ]
+    },
     'openai-deal': {
       title: 'OpenAI 2026 deal progression',
       messages: [
@@ -202,6 +232,124 @@
     return bubble;
   }
 
+  function createActionButton(label, onActivate) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'home-task-action ai-response-action';
+    button.textContent = label;
+    button.addEventListener('click', function () {
+      onActivate(button);
+    });
+    return button;
+  }
+
+  // Renders the proposed node map inline so the chat and the canvas visibly
+  // describe the same structure.
+  function createStructurePreview(structure) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'ai-response-structure';
+
+    const spine = document.createElement('ol');
+    spine.className = 'ai-structure-spine';
+    (structure.spine || []).forEach(function (step) {
+      const item = document.createElement('li');
+      item.textContent = step;
+      spine.appendChild(item);
+    });
+    wrapper.appendChild(spine);
+
+    const branches = structure.branches || [];
+    if (branches.length) {
+      const branchList = document.createElement('ul');
+      branchList.className = 'ai-structure-branches';
+
+      branches.forEach(function (branch) {
+        const item = document.createElement('li');
+
+        const label = document.createElement('span');
+        label.className = 'ai-structure-branch-label';
+        label.textContent = branch.label;
+
+        const detail = document.createElement('span');
+        detail.className = 'ai-structure-branch-detail';
+        detail.textContent = branch.detail;
+
+        item.appendChild(label);
+        item.appendChild(detail);
+        branchList.appendChild(item);
+      });
+
+      wrapper.appendChild(branchList);
+    }
+
+    return wrapper;
+  }
+
+  function appendAiMessage(response) {
+    messagesArea.appendChild(createAiResponse(response));
+    setMessagesBottomClearance(true);
+    scrollToBottom();
+    updateMessagesTopSpacing();
+  }
+
+  // The assistant reads conflicts off the live canvas state rather than from
+  // scripted copy, so the follow-up matches whatever was actually built.
+  function appendConflictFollowUp() {
+    const admin = window.ArcticEventAdmin;
+    if (!admin || typeof admin.getConflicts !== 'function') return;
+
+    const conflicts = admin.getConflicts();
+    let blockerIndex = -1;
+    conflicts.forEach(function (item, index) {
+      if (blockerIndex === -1 && item.type === 'error' && item.isResolvable) blockerIndex = index;
+    });
+
+    if (blockerIndex === -1) {
+      appendAiMessage({
+        intro: 'The canvas is built and I found no scheduling collisions across the three branches.',
+        heading: 'Ready for review',
+        details: ['Open any node on the canvas to fill in the remaining details.']
+      });
+      return;
+    }
+
+    const blocker = conflicts[blockerIndex];
+    appendAiMessage({
+      intro: 'The canvas is built. While laying out the branches I checked the regional schedules against each other and found a collision.',
+      heading: 'Needs a decision',
+      details: [
+        blocker.message,
+        `This affects ${blocker.sessionTitle} and ${blocker.counterpartTitle}. I can move the later session so the two no longer overlap.`
+      ],
+      actions: [
+        { label: 'Reschedule the later session', resolveConflictIndex: blockerIndex }
+      ]
+    });
+  }
+
+  function resolveCanvasConflict(index) {
+    const admin = window.ArcticEventAdmin;
+    if (!admin || typeof admin.resolveConflict !== 'function') return null;
+    return admin.resolveConflict(index);
+  }
+
+  function appendFixConfirmation(result) {
+    const timezoneNote = result.timezone ? ` (${result.timezone})` : '';
+    const details = [
+      `${result.sessionTitle} moved from ${result.previousWindow} to ${result.nextWindow}${timezoneNote}. Its schedule node is selected on the canvas.`
+    ];
+
+    details.push(result.remainingConflicts
+      ? `${result.remainingConflicts} other issue${result.remainingConflicts === 1 ? '' : 's'} still needs attention before publish.`
+      : 'No conflicts remain. The program is ready for review and publish.');
+
+    appendAiMessage({
+      intro: 'Done. I shifted the later session so the two no longer overlap, then re-checked the whole program.',
+      heading: 'Conflict resolved',
+      details: details
+    });
+  }
+
   function createAiResponse(response) {
     const wrapper = document.createElement('div');
     wrapper.className = 'ai-response';
@@ -241,23 +389,41 @@
       block2.appendChild(detailParagraph);
     });
 
+    if (response && response.structure) {
+      block2.appendChild(createStructurePreview(response.structure));
+    }
+
     if (response && response.actions && response.actions.length) {
       const actionsRow = document.createElement('div');
       actionsRow.className = 'ai-response-actions';
 
       response.actions.forEach(function (action) {
+        if (action.buildPlan) {
+          actionsRow.appendChild(createActionButton(action.label, function (button) {
+            openEventWorkspace({ plan: action.buildPlan, skipConfirm: true });
+            button.disabled = true;
+            appendConflictFollowUp();
+          }));
+          return;
+        }
+
+        if (typeof action.resolveConflictIndex === 'number') {
+          actionsRow.appendChild(createActionButton(action.label, function (button) {
+            const result = resolveCanvasConflict(action.resolveConflictIndex);
+            if (!result) return;
+            button.disabled = true;
+            appendFixConfirmation(result);
+          }));
+          return;
+        }
+
         if (action.openEventWorkspace && workspaceEventView) {
-          const button = document.createElement('button');
-          button.type = 'button';
-          button.className = 'home-task-action ai-response-action';
-          button.textContent = action.label;
-          button.addEventListener('click', function () {
+          actionsRow.appendChild(createActionButton(action.label, function () {
             openEventWorkspace({
               template: action.template,
               basicsTitle: action.basicsTitle
             });
-          });
-          actionsRow.appendChild(button);
+          }));
           return;
         }
 
@@ -349,6 +515,7 @@
 
     if (window.ArcticEventAdmin && typeof window.ArcticEventAdmin.openWorkspace === 'function') {
       window.ArcticEventAdmin.openWorkspace({
+        plan: opts.plan,
         template: opts.template,
         basicsTitle: opts.basicsTitle,
         skipConfirm: opts.skipConfirm
@@ -692,6 +859,16 @@
     });
   }
 
+  if (draftProgramButton) {
+    draftProgramButton.addEventListener('click', function () {
+      if (isEditingTitle) {
+        finishTitleEdit(true);
+      }
+
+      loadDemoChat('methodology-rollout');
+    });
+  }
+
   if (chatListSections) {
     chatListSections.addEventListener('click', function (e) {
       const demoChatButton = e.target.closest('[data-demo-chat]');
@@ -707,6 +884,13 @@
 
   if (window.location.hash === '#events-workspace' && workspaceEventView) {
     openEventWorkspace();
+  }
+
+  // Starts the story at the conversation, not the canvas, so the build step
+  // stays a deliberate click for anyone exploring the prototype unguided.
+  if (window.location.hash === '#methodology-rollout') {
+    loadDemoChat('methodology-rollout');
+    return;
   }
 
   if (window.location.hash === '#events-chat') {
