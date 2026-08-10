@@ -1763,10 +1763,9 @@ a.switcher-nav-link {
   flex-shrink: 0;
 }
 
-/* The greeting and the inset rule above it share the content's 24px left edge. */
+/* The greeting shares the content's 24px inset and sits 24px above the rule. */
 #workspace-default-view .content-pane-header-workspace {
-  padding-right: var(--space-xl);
-  padding-left: var(--space-xl);
+  padding: var(--space-xl);
 }
 
 .workspace-home-columns {
@@ -1869,6 +1868,14 @@ a.switcher-nav-link {
   line-height: 1.5;
 }
 
+/* Cap-trim the labels like the comp so each date group is ~27px and the list
+   fits beside the calendar instead of overrunning it. */
+.important-date strong,
+.important-date span {
+  text-box-trim: trim-both;
+  text-box-edge: cap alphabetic;
+}
+
 /* Content cards: a fixed thumbnail beside title, description, and metadata.
    Shared by the AI, launch, and strategy memo rows. */
 .content-card-list {
@@ -1923,7 +1930,6 @@ a.switcher-nav-link {
   display: flex;
   flex: 1;
   flex-direction: column;
-  justify-content: space-between;
   gap: var(--space-md);
   min-width: 0;
   padding: var(--space-lg);
@@ -1936,20 +1942,25 @@ a.switcher-nav-link {
   min-width: 0;
 }
 
+/* Trim the line-box leading to cap height, matching the comp's text-box-trim,
+   so titles and descriptions occupy the same compact height inside 112px. */
 .content-card-title,
 .content-card-desc {
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
   overflow: hidden;
+  text-box-trim: trim-both;
+  text-box-edge: cap text;
 }
 
 .content-card-title {
+  -webkit-line-clamp: 3;
   font-size: var(--text-md);
   letter-spacing: 0;
 }
 
 .content-card-desc {
+  -webkit-line-clamp: 2;
   font-size: var(--text-xs);
   line-height: 1.3;
 }
@@ -1960,7 +1971,7 @@ a.switcher-nav-link {
   gap: var(--space-sm);
   color: var(--text-secondary);
   font-size: var(--size-10);
-  line-height: var(--line-height-md);
+  line-height: var(--line-height-tight);
   white-space: nowrap;
 }
 
@@ -1997,17 +2008,16 @@ a.switcher-nav-link {
   position: relative;
   padding: var(--space-xl);
   border-radius: var(--radius-sm);
-  background: linear-gradient(180deg, var(--background-base) 16%, #c5eef3 141%);
+  background: var(--background-base);
   overflow: hidden;
 }
 
+/* The flower hero spans the full section in the comp, so cover the whole
+   surface rather than only the top; otherwise a cyan band shows below it. */
 .launch-feature::before {
   content: '';
   position: absolute;
-  top: 0;
-  right: 0;
-  left: 0;
-  height: 288px;
+  inset: 0;
   background: url('assets/home-launch-hero.jpg') center / cover no-repeat;
 }
 
@@ -2035,6 +2045,19 @@ a.switcher-nav-link {
 .launch-feature-divider {
   height: 1px;
   background: var(--background-base);
+}
+
+/* Launch articles sit closer together than the top-level 48px columns. */
+.launch-articles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-lg);
+}
+
+@container workspace-home (max-width: 760px) {
+  .launch-articles {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /* ======================================
