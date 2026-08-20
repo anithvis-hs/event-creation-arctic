@@ -21,7 +21,6 @@
   const workspacePanel = document.getElementById('workspace-panel');
   const workspaceDefaultView = document.getElementById('workspace-default-view');
   const workspaceEventView = document.getElementById('workspace-event-view');
-  const eventsWorkspaceButton = document.getElementById('events-workspace-button');
   const draftProgramButton = document.getElementById('draft-program-button');
   const newChatBtn = document.getElementById('new-chat-button');
   const chatListBtn = document.getElementById('chat-list-button');
@@ -62,7 +61,7 @@
             'AMER and EMEA both run on March 12 and APAC on March 13, which keeps the whole rollout inside one week and well ahead of the March 31 deadline.'
           ],
           structure: {
-            spine: ['Basics', 'Registration', 'Instructors', 'Sessions'],
+            spine: ['Basics', 'Registration', 'Sessions'],
             branches: [
               { label: 'AMER', detail: '180 seats, Mar 12, America/Los_Angeles' },
               { label: 'EMEA', detail: '150 seats, Mar 12, Europe/London' },
@@ -151,7 +150,7 @@
           intro: 'I\'ll open the event workspace beside chat so you can build from a blank canvas. Start in Basics with the title "Sales Strategies and Approaches 2026", then add registration and session nodes and connect calendar experiences when you\'re ready.',
           heading: 'Create from scratch',
           details: [
-            'Use the workspace link below, then complete Basics before moving through the canvas nodes.'
+            'Use the workspace link below, then complete Basics before moving through the canvas.'
           ],
           actions: [
             { label: 'Open event workspace', openEventWorkspace: true, basicsTitle: DEMO_EVENT_BASICS_TITLE }
@@ -417,6 +416,14 @@
           return;
         }
 
+        if (action.generatedDraft && workspaceEventView) {
+          actionsRow.appendChild(createActionButton(action.label, function (button) {
+            openEventWorkspace({ generatedDraft: action.generatedDraft, skipConfirm: true });
+            button.disabled = true;
+          }));
+          return;
+        }
+
         if (action.openEventWorkspace && workspaceEventView) {
           actionsRow.appendChild(createActionButton(action.label, function () {
             openEventWorkspace({
@@ -515,9 +522,11 @@
 
     if (window.ArcticEventAdmin && typeof window.ArcticEventAdmin.openWorkspace === 'function') {
       window.ArcticEventAdmin.openWorkspace({
+        newEvent: opts.newEvent,
         plan: opts.plan,
         template: opts.template,
         basicsTitle: opts.basicsTitle,
+        generatedDraft: opts.generatedDraft,
         skipConfirm: opts.skipConfirm
       });
     }
@@ -645,12 +654,42 @@
     });
   }
 
+  // Loose gate so event descriptions route to the generator while ordinary
+  // questions still get the generic assistant reply.
+  function looksLikeEventPrompt(text) {
+    return /\b(event|session|sessions|onboarding|training|kickoff|kick-off|workshop|webinar|certification|summit|bootcamp|course|program|programme|offsite|off-site|conference|seminar|enablement|schedule|create)\b/i.test(text);
+  }
+
+  // Turns a typed description into a chat response whose inline structure and
+  // "Build this event" action describe the very draft the workspace will load.
+  function buildGeneratedEventResponse(text) {
+    const admin = window.ArcticEventAdmin;
+    if (!admin || typeof admin.generateFromText !== 'function' || !workspaceEventView) return null;
+
+    const result = admin.generateFromText(text);
+    if (!result || !result.draft) return null;
+
+    const branches = (result.structure && result.structure.branches) || [];
+    const detail = branches.length === 1
+      ? 'One session with schedule, venue, capacity, and instructor details ready to edit.'
+      : `${branches.length} sessions, each with its own schedule, venue, capacity, and instructors.`;
+
+    return {
+      intro: result.rationale,
+      heading: 'Proposed structure',
+      details: [detail],
+      structure: result.structure,
+      actions: [{ label: 'Build this event', generatedDraft: result.draft }]
+    };
+  }
+
   function submitMessage(messageText) {
     const text = typeof messageText === 'string' ? messageText.trim() : input.textContent.trim();
     if (!text) return;
 
     messagesArea.appendChild(createUserBubble(text));
-    messagesArea.appendChild(createAiResponse());
+    const generated = looksLikeEventPrompt(text) ? buildGeneratedEventResponse(text) : null;
+    messagesArea.appendChild(createAiResponse(generated || undefined));
 
     input.textContent = '';
     updateArrow();
@@ -852,10 +891,47 @@
     });
   }
 
-  if (eventsWorkspaceButton) {
-    eventsWorkspaceButton.addEventListener('click', function () {
+  // Selecting a destination in the page switcher swaps the preview panel rather
+  // than navigating. Only Deals and Events have panels today; the other rail
+  // items stay inert.
+  function selectSwitcherTarget(target) {
+    const navItems = document.querySelectorAll('.switcher-nav-item[data-switcher-target]');
+    navItems.forEach(function (item) {
+      const isSelected = item.dataset.switcherTarget === target;
+      item.classList.toggle('is-selected', isSelected);
+      if (isSelected) item.setAttribute('aria-current', 'page');
+      else item.removeAttribute('aria-current');
+    });
+
+    const panels = document.querySelectorAll('.switcher-panel[data-switcher-panel]');
+    panels.forEach(function (panel) {
+      panel.classList.toggle('is-hidden', panel.dataset.switcherPanel !== target);
+    });
+  }
+
+  document.querySelectorAll('.switcher-nav-item[data-switcher-target]').forEach(function (item) {
+    item.addEventListener('click', function () {
+      const target = item.dataset.switcherTarget;
+      if (!document.querySelector('.switcher-panel[data-switcher-panel="' + target + '"]')) return;
+      selectSwitcherTarget(target);
+    });
+  });
+
+  const eventsNewButton = document.getElementById('events-new-button');
+  if (eventsNewButton) {
+    eventsNewButton.addEventListener('click', function () {
       closePageSwitcher();
-      openEventWorkspace();
+      openEventWorkspace({ newEvent: true });
+    });
+  }
+
+  const eventsAiButton = document.getElementById('events-ai-button');
+  if (eventsAiButton) {
+    eventsAiButton.addEventListener('click', function () {
+      closePageSwitcher();
+      setView('home');
+      const composer = document.getElementById('home-prompt-input');
+      if (composer) composer.focus();
     });
   }
 

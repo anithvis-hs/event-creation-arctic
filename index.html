@@ -234,7 +234,7 @@
           </div>
         </header>
         <div class="content-pane-divider"></div>
-        <section class="workspace-event-editor" aria-label="Node-based event setup">
+        <section class="workspace-event-editor" aria-label="Event setup">
           <div id="event-editor-root"></div>
         </section>
       </div>
@@ -290,7 +290,7 @@
               <img src="assets/page-switcher-logo.svg" alt="Highspot" class="page-switcher-logo" />
               <div class="page-switcher-divider"></div>
               <div class="page-switcher-nav-items">
-                <button type="button" class="switcher-nav-item is-selected" aria-current="page">
+                <button type="button" class="switcher-nav-item is-selected" aria-current="page" data-switcher-target="deals">
                   <span class="switcher-nav-icon-slot">
                     <img src="assets/page-switcher-icon-deals.svg" alt="" class="switcher-nav-icon" />
                   </span>
@@ -308,7 +308,7 @@
                   </span>
                   <span>Knowledge</span>
                 </button>
-                <button type="button" class="switcher-nav-item" id="events-workspace-button">
+                <button type="button" class="switcher-nav-item" id="events-workspace-button" data-switcher-target="events">
                   <span class="switcher-nav-icon-slot">
                     <img src="assets/page-switcher-icon-events.svg" alt="" class="switcher-nav-icon" />
                   </span>
@@ -327,30 +327,56 @@
               </div>
             </div>
             <div class="page-switcher-content">
-              <div class="switcher-content-header">
-                <span>My Deals</span>
-                <img src="assets/page-switcher-arrow.svg" alt="" class="switcher-content-arrow" />
-              </div>
-              <div class="page-switcher-divider"></div>
-              <div class="switcher-content-section">
-                <h4>Your upcoming meetings</h4>
-                <div class="switcher-content-row">
-                  <div class="switcher-thumb"><img src="assets/new%20chat.svg" alt="" /></div>
-                  <div class="switcher-content-copy">
-                    <strong>AWS Weekly Sync</strong>
-                    <span>Host: Vanessa C.</span>
-                    <span>Today, 11:00 AM</span>
-                  </div>
-                  <button type="button" class="switcher-row-button">Run meeting prep</button>
+              <div class="switcher-panel" data-switcher-panel="deals">
+                <div class="switcher-content-header">
+                  <span>My Deals</span>
+                  <img src="assets/page-switcher-arrow.svg" alt="" class="switcher-content-arrow" />
                 </div>
-                <div class="switcher-content-row">
-                  <div class="switcher-thumb switcher-thumb-primary"><img src="assets/chat%20list.svg" alt="" /></div>
-                  <div class="switcher-content-copy">
-                    <strong>Visa Inc stakeholder sync</strong>
-                    <span>Host: Hao L.</span>
-                    <span>Today, 3:00 PM</span>
+                <div class="page-switcher-divider"></div>
+                <div class="switcher-content-section">
+                  <h4>Your upcoming meetings</h4>
+                  <div class="switcher-content-row">
+                    <div class="switcher-thumb"><img src="assets/new%20chat.svg" alt="" /></div>
+                    <div class="switcher-content-copy">
+                      <strong>AWS Weekly Sync</strong>
+                      <span>Host: Vanessa C.</span>
+                      <span>Today, 11:00 AM</span>
+                    </div>
+                    <button type="button" class="switcher-row-button">Run meeting prep</button>
                   </div>
-                  <button type="button" class="switcher-row-button">Run meeting prep</button>
+                  <div class="switcher-content-row">
+                    <div class="switcher-thumb switcher-thumb-primary"><img src="assets/chat%20list.svg" alt="" /></div>
+                    <div class="switcher-content-copy">
+                      <strong>Visa Inc stakeholder sync</strong>
+                      <span>Host: Hao L.</span>
+                      <span>Today, 3:00 PM</span>
+                    </div>
+                    <button type="button" class="switcher-row-button">Run meeting prep</button>
+                  </div>
+                </div>
+              </div>
+              <div class="switcher-panel is-hidden" data-switcher-panel="events">
+                <div class="switcher-content-header">
+                  <span>Events</span>
+                  <img src="assets/page-switcher-arrow.svg" alt="" class="switcher-content-arrow" />
+                </div>
+                <div class="page-switcher-divider"></div>
+                <div class="switcher-content-section">
+                  <h4>Create an event</h4>
+                  <button type="button" class="switcher-entry" id="events-new-button">
+                    <span class="switcher-entry-icon"><img src="assets/page-switcher-icon-events.svg" alt="" /></span>
+                    <span class="switcher-entry-copy">
+                      <strong>New event</strong>
+                      <span>Start from the outline</span>
+                    </span>
+                  </button>
+                  <button type="button" class="switcher-entry" id="events-ai-button">
+                    <span class="switcher-entry-icon switcher-entry-icon-primary"><img src="assets/new%20chat.svg" alt="" /></span>
+                    <span class="switcher-entry-copy">
+                      <strong>Create with AI</strong>
+                      <span>Describe it in chat</span>
+                    </span>
+                  </button>
                 </div>
               </div>
             </div>

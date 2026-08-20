@@ -1,0 +1,6 @@
+# Local verification harness (Playwright/jsdom dev tooling, screenshots, deps).
+# Kept out of the static kit to preserve its no-build, no-node-modules nature.
+verify-tmp/
+
+# macOS
+.DS_Store
