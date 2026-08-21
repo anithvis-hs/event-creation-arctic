@@ -85,9 +85,20 @@ Cold-start quick form to seed the common case in seconds, then an **always-visib
 - **Outline feels less impressive in demos.** Mitigation: lean on the cold-start quick form (fast "wow"), live status, and the publish-review gate for demo moments; optionally show the graph overview as a flourish.
 - **Novelty vs. the familiar wizard.** Mitigation: keep steps implicit via the outline order and continuous validation; add light first-run guidance.
 
+## Update — surface decision revisited (map-forward blend)
+
+The surface question was reopened once the prototype's job was pinned down: it must be **both** a demo that persuades **and** feel usable, with a **small event (1-3 sessions)** as the hero. That is the regime where a canvas wins — small events stay clean, the generative reveal delivers the wow, and a shared detail panel keeps editing usable. So the earlier "outline over canvas" call is superseded for this prototype by a **map-forward blend**:
+
+- The map is the **default reveal / visualization surface** (whole-shape-at-a-glance, dramatizes "the AI built this").
+- The outline is a **co-equal, one-click surface** for editing and scale.
+- **Both feed the same node detail panel;** narrow screens (<= 760px) fall back to the outline, which the toggle always reaches.
+
+This resolves the "read-only graph overview" open question below: the graph is kept, and promoted from an optional overview to the default reveal surface (still editable via the shared panel). The hierarchy-not-a-graph point still holds — the map visualizes the hierarchy without implying sessions route to each other, and the honest "Sessions / Session" labels stay.
+
 ## Open questions (for the design discussion)
 
-- How much does visual differentiation / "wow" matter here versus raw speed and clarity for admins?
-- Is the opt-in **read-only graph overview** worth keeping, or is it maintenance we don't need?
+- ~~How much does visual differentiation / "wow" matter here versus raw speed and clarity for admins?~~ Resolved: the prototype is demo-plus-usable, so the map's wow is worth its cost at the small-event hero size.
+- ~~Is the opt-in **read-only graph overview** worth keeping, or is it maintenance we don't need?~~ Resolved: kept and promoted to the default reveal surface (see update above).
 - Do we want a **single-session express path** (quick form -> publish) that skips the outline entirely for the simplest case?
 - Where should this live relative to today's wizard — full replacement, or a switchable "advanced" mode during rollout?
+- How should the map behave for large programs (10+ sessions) where the canvas crowds — auto-fall-back to outline, collapse, or paginate? (Out of scope for the small-event hero.)

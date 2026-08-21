@@ -98,8 +98,8 @@
   NODE_VISUALS[NODE_TYPES.BASICS] = { kind: 'Event details', icon: 'document', tone: 'blue' };
   NODE_VISUALS[NODE_TYPES.REGISTRATION] = { kind: 'Registration', icon: 'ticket', tone: 'blue' };
   NODE_VISUALS[NODE_TYPES.BANNER] = { kind: 'Media', icon: 'image', tone: 'slate' };
-  NODE_VISUALS[NODE_TYPES.SESSIONS] = { kind: 'Branch point', icon: 'branch', tone: 'accent' };
-  NODE_VISUALS[NODE_TYPES.SESSION] = { kind: 'Session branch', icon: 'calendar', tone: 'accent' };
+  NODE_VISUALS[NODE_TYPES.SESSIONS] = { kind: 'Sessions', icon: 'branch', tone: 'accent' };
+  NODE_VISUALS[NODE_TYPES.SESSION] = { kind: 'Session', icon: 'calendar', tone: 'accent' };
   NODE_VISUALS[NODE_TYPES.SESSION_BASICS] = { kind: 'Session detail', icon: 'document', tone: 'slate' };
   NODE_VISUALS[NODE_TYPES.SESSION_SCHEDULE] = { kind: 'Session detail', icon: 'clock', tone: 'slate' };
   NODE_VISUALS[NODE_TYPES.SESSION_VENUE] = { kind: 'Session detail', icon: 'pin', tone: 'slate' };
@@ -170,6 +170,8 @@
     startBlankButton: document.getElementById('event-start-blank-button'),
     adminPanel: document.querySelector('.event-admin-panel'),
     coldStart: document.getElementById('event-cold-start'),
+    proposal: document.getElementById('event-proposal'),
+    proposalForm: document.getElementById('event-proposal-form'),
     aiForm: document.getElementById('event-ai-form'),
     aiInput: document.getElementById('event-ai-input'),
     aiSubmit: document.getElementById('event-ai-submit'),
@@ -229,9 +231,22 @@
     layout: null,
     openInsertKey: null,
     aiChangedNodeIds: {},
+    // One-shot flag: the next map paint staggers its nodes in as a reveal. Set
+    // by the build paths, consumed and cleared by the render pass.
+    revealNodes: false,
     // 'outline' is the primary editing surface; 'map' is the read-only graph.
+    // In the chat-first flow the agent opens the canvas ('map') as a live
+    // artifact, so callers may override this via openWorkspace({ viewMode }).
     viewMode: 'outline',
-    collapsedNodeIds: {}
+    collapsedNodeIds: {},
+    // Set by the chat layer so a click on a canvas node can route back into the
+    // conversation instead of demanding form editing on the canvas.
+    onNodeFocus: null,
+    // The human-editable proposal being reviewed before the event is mapped.
+    proposalParams: null,
+    // Fired after a proposal is built so the chat layer can run its enterprise
+    // sync pass on the freshly mapped event.
+    onEventBuilt: null
   };
 
   let toastTimeoutId = null;
@@ -705,6 +720,33 @@
     state.openInsertKey = null;
     clearAlert();
     renderAll();
+    emphasizeInspector();
+    if (typeof state.onNodeFocus === 'function') {
+      try { state.onNodeFocus(getNodeFocusInfo(nodeId)); } catch (error) { /* chat layer is optional */ }
+    }
+  }
+
+  // The map keeps details off-canvas, so a click's payoff shows up in the narrow
+  // far-right inspector. Flash the panel (and scroll it into view on stacked
+  // layouts) so the click visibly registers. The flash is CSS, guarded by
+  // prefers-reduced-motion.
+  function emphasizeInspector() {
+    if (state.viewMode !== 'map') return;
+    const panel = DOM.title && DOM.title.closest('.event-admin-main-panel');
+    if (!panel) return;
+    panel.classList.remove('is-attn');
+    void panel.offsetWidth;
+    panel.classList.add('is-attn');
+    if (window.innerWidth < 760 && typeof panel.scrollIntoView === 'function') {
+      panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }
+
+  function getNodeFocusInfo(nodeId) {
+    const node = getNodeById(nodeId);
+    if (!node) return null;
+    const title = node.type === NODE_TYPES.SESSION ? getSessionTitle(node.id) : cleanText(node.label);
+    return { id: node.id, type: node.type, title: title };
   }
 
   function startPanDrag(event) {
@@ -962,6 +1004,8 @@
 
         const columnX = branchStartX + (columnIndex * (CANVAS_NODE_WIDTH + CANVAS_COL_GAP));
         const columnCenterX = columnX + (CANVAS_NODE_WIDTH / 2);
+        // Map view is a high-level overview: one node per session. The session's
+        // detail nodes live in the outline and the inspector, not on the canvas.
         const headEntry = makeLayoutEntry(sessionNode, columnX, branchTop);
         entries.push(headEntry);
 
@@ -970,19 +1014,8 @@
           d: buildElbowPath(centerX, entryBottom(previousEntry), columnCenterX, headEntry.y, fanBusY)
         });
 
-        let columnTail = headEntry;
-        getSessionChildNodes(draft, sessionId).forEach(function (child) {
-          const childEntry = makeLayoutEntry(child, columnX, entryBottom(columnTail) + CANVAS_ROW_GAP);
-          entries.push(childEntry);
-          connectors.push({
-            kind: 'spine',
-            d: `M ${columnCenterX} ${entryBottom(columnTail)} L ${columnCenterX} ${childEntry.y}`
-          });
-          columnTail = childEntry;
-        });
-
-        mergeSources.push(columnTail);
-        branchBottom = Math.max(branchBottom, entryBottom(columnTail));
+        mergeSources.push(headEntry);
+        branchBottom = Math.max(branchBottom, entryBottom(headEntry));
       });
 
       // Stub extending the fan-out bus so the add-branch button reads as part of it.
@@ -1249,6 +1282,16 @@
   // information here is horizontal anyway: parallel branches side by side. So
   // fit the width, keep the scale legible, and let branch depth run off the
   // bottom as an invitation to scroll.
+  // A freshly built event reveals on the map so the admin sees the whole shape
+  // at once (the wow of "the AI built this"); narrow screens fall back to the
+  // outline, which the toggle still reaches. Callers set this before renderAll
+  // so the first paint is already the reveal surface and frameGraphForIntro has
+  // a layout to frame.
+  function setRevealViewMode() {
+    const narrow = typeof window.innerWidth === 'number' && window.innerWidth > 0 && window.innerWidth < 760;
+    state.viewMode = narrow ? 'outline' : 'map';
+  }
+
   function frameGraphForIntro() {
     if (!state.draft || !state.layout) return;
     const padding = 32;
@@ -1433,6 +1476,90 @@
     renderAll();
   }
 
+  function swapSessionsByIndex(a, b) {
+    const sessions = state.draft.sessions;
+    if (a < 0 || b < 0 || a >= sessions.length || b >= sessions.length || a === b) return false;
+    // syncSessionIndex derives session order from node.order, so swap the two
+    // nodes' order values for the reorder to survive the resync.
+    const nodeA = state.draft.nodes.find(function (node) { return node.id === sessions[a]; });
+    const nodeB = state.draft.nodes.find(function (node) { return node.id === sessions[b]; });
+    if (!nodeA || !nodeB) return false;
+    const temp = nodeA.order;
+    nodeA.order = nodeB.order;
+    nodeB.order = temp;
+    syncSessionIndex(state.draft);
+    syncGraphStructure(state.draft);
+    markDirty();
+    renderAll();
+    return true;
+  }
+
+  // Chat-driven edits on the open event: the conversation parses intent and
+  // hands a structured command here, so all mutation stays in one place. Returns
+  // a { ok, message } the chat echoes back as a confirmation.
+  function applyEventEdit(command) {
+    if (!state.isInitialized || !state.draft) return { ok: false, message: 'Open an event first.' };
+    const cmd = command || {};
+    const sessions = state.draft.sessions || [];
+
+    if (cmd.type === 'swap') {
+      const a = sessions.indexOf(cmd.sessionId);
+      const b = sessions.indexOf(cmd.otherSessionId);
+      if (a === -1 || b === -1) return { ok: false, message: 'I could not find those sessions.' };
+      const nameA = getSessionTitle(sessions[a]);
+      const nameB = getSessionTitle(sessions[b]);
+      if (!swapSessionsByIndex(a, b)) return { ok: false, message: 'Those sessions could not be swapped.' };
+      return { ok: true, message: `Swapped "${nameA}" and "${nameB}".` };
+    }
+
+    if (cmd.type === 'rename-session') {
+      if (sessions.indexOf(cmd.sessionId) === -1) return { ok: false, message: 'I could not find that session.' };
+      const title = cleanText(cmd.title);
+      if (!title) return { ok: false, message: 'Give the session a name.' };
+      setSessionTitle(state.draft, cmd.sessionId, title);
+      markDirty();
+      renderAll();
+      return { ok: true, message: `Renamed the session to "${title}".` };
+    }
+
+    if (cmd.type === 'rename-event') {
+      const title = cleanText(cmd.title);
+      if (!title) return { ok: false, message: 'Give the event a name.' };
+      const basicsId = findSingletonNodeId(state.draft, NODE_TYPES.BASICS);
+      if (!basicsId) return { ok: false, message: 'This event has no Basics to name.' };
+      const payload = state.draft.payloadByNodeId[basicsId] || (state.draft.payloadByNodeId[basicsId] = {});
+      payload.title = title;
+      markDirty();
+      renderAll();
+      return { ok: true, message: `Renamed the event to "${title}".` };
+    }
+
+    if (cmd.type === 'add-session') {
+      const newId = addNodeByType(state.draft, NODE_TYPES.SESSION, true);
+      if (!newId) return { ok: false, message: 'I could not add a session.' };
+      markDirty();
+      updateColdStartVisibility();
+      renderAll();
+      return { ok: true, message: `Added a session. The event now has ${(state.draft.sessions || []).length} sessions.` };
+    }
+
+    if (cmd.type === 'remove-session') {
+      if (sessions.indexOf(cmd.sessionId) === -1) return { ok: false, message: 'I could not find that session.' };
+      const name = getSessionTitle(cmd.sessionId);
+      removeNode(cmd.sessionId);
+      return { ok: true, message: `Removed "${name}".` };
+    }
+
+    if (cmd.type === 'duplicate-session') {
+      if (sessions.indexOf(cmd.sessionId) === -1) return { ok: false, message: 'I could not find that session.' };
+      const name = getSessionTitle(cmd.sessionId);
+      duplicateSession(cmd.sessionId);
+      return { ok: true, message: `Duplicated "${name}".` };
+    }
+
+    return { ok: false, message: 'I can\'t do that yet.' };
+  }
+
   function jumpToIncompleteSession() {
     const incomplete = state.draft.sessions
       .map(function (sessionId) {
@@ -1445,7 +1572,7 @@
       });
 
     if (!incomplete) {
-      showToast('All session branches pass required checks.', 4000);
+      showToast('All sessions pass required checks.', 4000);
       return;
     }
 
@@ -1921,7 +2048,7 @@
         + `<span class="event-palette-tile event-canvas-tone-${visual.tone}" aria-hidden="true">${renderNodeIcon(visual.icon)}</span>`
         + '<span class="event-palette-copy">'
         + `<span class="event-palette-title">${escapeHtml(item.label)}</span>`
-        + `<span class="event-palette-helper">${escapeHtml(isUsed ? 'Already on the canvas' : item.helper)}</span>`
+        + `<span class="event-palette-helper">${escapeHtml(isUsed ? 'Already added' : item.helper)}</span>`
         + '</span>'
         + '</button>';
     }).join('');
@@ -2015,9 +2142,26 @@
     return '';
   }
 
-  function renderCanvasNode(entry) {
+  // A session head's status rolls up its detail nodes, so the clean overview
+  // still flags which branch needs work even though the details are off-canvas.
+  function sessionHeadStatus(sessionId) {
+    const children = getSessionChildNodes(state.draft, sessionId);
+    if (!children.length) return STATUS.NOT_STARTED;
+    const statuses = children.map(function (child) { return nodeStatus(child); });
+    if (statuses.indexOf(STATUS.NEEDS_ATTENTION) > -1) return STATUS.NEEDS_ATTENTION;
+    const required = children.filter(function (child) { return child.required; });
+    if (required.length && required.every(function (child) { return nodeStatus(child) === STATUS.COMPLETE; })) {
+      return STATUS.COMPLETE;
+    }
+    if (statuses.indexOf(STATUS.COMPLETE) > -1 || statuses.indexOf(STATUS.IN_PROGRESS) > -1) {
+      return STATUS.IN_PROGRESS;
+    }
+    return STATUS.NOT_STARTED;
+  }
+
+  function renderCanvasNode(entry, revealOrder) {
     const node = entry.node;
-    const status = nodeStatus(node);
+    const status = node.type === NODE_TYPES.SESSION ? sessionHeadStatus(node.id) : nodeStatus(node);
     const isActive = state.selectedNodeId === node.id;
     // The session head carries its own name so the column identifies itself
     // without a separate floating label above it.
@@ -2039,6 +2183,11 @@
     if (showError) classNames.push('event-canvas-node-has-error');
     if (isActive) classNames.push('is-active');
     if (state.aiChangedNodeIds[node.id]) classNames.push('is-ai-changed');
+    // Staggered entrance on the build reveal. Cap the delay so a larger event
+    // does not make the last node wait too long.
+    const isRevealing = typeof revealOrder === 'number' && revealOrder >= 0;
+    if (isRevealing) classNames.push('is-revealing');
+    const revealDelay = isRevealing ? `--reveal-delay:${Math.min(revealOrder, 12) * 60}ms;` : '';
 
     // A dot rather than a text chip: a seeded program has 30-odd complete nodes,
     // and repeating the word on every card drowns out the few that need work.
@@ -2046,7 +2195,7 @@
       ? ''
       : `<span class="event-canvas-node-dot ${statusClass(status)}" role="img" aria-label="${escapeHtml(status)}" title="${escapeHtml(status)}"></span>`;
 
-    return `<div class="${classNames.join(' ')}" data-node-id="${node.id}" role="button" tabindex="0" aria-pressed="${isActive}" style="left:${entry.x}px;top:${entry.y}px;width:${entry.width}px;height:${entry.height}px">`
+    return `<div class="${classNames.join(' ')}" data-node-id="${node.id}" role="button" tabindex="0" aria-pressed="${isActive}" style="left:${entry.x}px;top:${entry.y}px;width:${entry.width}px;height:${entry.height}px;${revealDelay}">`
       + removeButton
       + `<span class="event-canvas-node-tile event-canvas-tone-${visual.tone}" aria-hidden="true">${renderNodeIcon(visual.icon)}</span>`
       + '<span class="event-canvas-node-copy">'
@@ -2268,8 +2417,14 @@
 
   // One paint routine for the middle column, so every caller stays view-agnostic.
   function renderView() {
-    if (state.viewMode === 'map') renderCanvas();
-    else renderOutline();
+    if (state.viewMode === 'map') {
+      renderCanvas();
+    } else {
+      renderOutline();
+      // The outline has its own row-in animation; the map reveal flag is only
+      // meaningful for a canvas paint, so drop it here to stay one-shot.
+      state.revealNodes = false;
+    }
     updateViewToggle();
   }
 
@@ -2281,11 +2436,14 @@
     state.draft.meta.graphWidth = layout.width;
     state.draft.meta.graphHeight = layout.height;
 
+    const revealing = state.revealNodes === true;
+    let revealOrder = 0;
     const nodesMarkup = layout.entries.map(function (entry) {
       if (entry.isTerminal) return renderCanvasTerminal(entry);
       if (entry.isGhost) return renderCanvasGhost(entry);
-      return renderCanvasNode(entry);
+      return renderCanvasNode(entry, revealing ? revealOrder++ : -1);
     }).join('');
+    state.revealNodes = false;
 
     DOM.canvas.innerHTML = '<div class="event-canvas-viewport" id="event-canvas-viewport">'
       + `<div class="event-canvas-graph" id="event-canvas-graph" style="width:${layout.width}px;height:${layout.height}px">`
@@ -2307,7 +2465,10 @@
     const selected = state.draft.nodes.find(function (node) { return node.id === state.selectedNodeId; });
     const savedAt = new Date(state.draft.meta.lastSavedAt);
 
-    DOM.title.textContent = selected ? `${selected.label} details` : 'Event details';
+    const selectedTitle = selected
+      ? (selected.type === NODE_TYPES.SESSION ? getSessionTitle(selected.id) : selected.label)
+      : '';
+    DOM.title.textContent = selected ? `${selectedTitle} details` : 'Event details';
     if (selected) {
       const status = nodeStatus(selected);
       DOM.statusChip.className = `event-status ${statusClass(status)}`;
@@ -2380,6 +2541,149 @@
     setColdStart(false);
   }
 
+  // The proposal review is a third state of the panel (alongside cold start and
+  // the builder): a human checkpoint that stands the builder grid down until the
+  // admin confirms what the AI understood and clicks Build.
+  function setProposalMode(isShowing) {
+    if (DOM.proposal) DOM.proposal.classList.toggle('is-hidden', !isShowing);
+    if (DOM.adminPanel) DOM.adminPanel.classList.toggle('is-proposal', isShowing);
+    [
+      DOM.workspaceSaveButton,
+      DOM.workspaceReviewButton,
+      DOM.workspacePublishButton,
+      DOM.saveButton,
+      DOM.reviewButton,
+      DOM.publishButton
+    ].forEach(function (button) {
+      if (button) button.classList.toggle('is-hidden', isShowing);
+    });
+  }
+
+  function normalizeProposalParams(params) {
+    const p = Object.assign({}, params || {});
+    p.title = cleanText(p.title) || 'New event';
+    p.description = p.description || '';
+    p.spot = p.spot || 'Northwest Spot';
+    p.sessionCount = clampSessionCount(p.sessionCount || 1);
+    p.cadence = p.cadence === 'weekly' || p.cadence === 'daily' ? p.cadence : 'sameday';
+    p.modality = p.modality === 'virtual' ? 'virtual' : 'physical';
+    p.location = p.location || '';
+    p.virtualLink = p.virtualLink || '';
+    p.startTime = p.startTime || '09:00';
+    p.endTime = p.endTime || '10:00';
+    p.date = p.date || '';
+    p.dateExplicit = Boolean(p.date);
+    if (typeof p.timeExplicit !== 'boolean') p.timeExplicit = false;
+    p.instructors = Array.isArray(p.instructors) ? p.instructors.slice() : [];
+    p.registrationModes = Array.isArray(p.registrationModes) && p.registrationModes.length
+      ? p.registrationModes.slice()
+      : ['open-registration'];
+    return p;
+  }
+
+  function renderProposalGaps() {
+    const host = document.getElementById('event-proposal-gaps');
+    if (!host) return;
+    const items = analyzeProposal(state.proposalParams);
+    if (!items.length) {
+      host.innerHTML = '<p class="event-helper">Looks complete. Build it whenever you are ready.</p>';
+      return;
+    }
+    const rows = items.map(function (item) {
+      const kindLabel = item.kind === 'gap' ? 'Needs input' : 'Assumed';
+      return `<li class="event-proposal-gap is-${item.kind}"><span class="event-proposal-gap-kind">${kindLabel}</span><span>${escapeHtml(item.message)}</span></li>`;
+    }).join('');
+    host.innerHTML = `<span class="event-inline-label">Before you build</span><ul class="event-proposal-gap-list">${rows}</ul>`;
+  }
+
+  function renderProposalReview() {
+    if (!DOM.proposalForm) return;
+    const p = state.proposalParams || {};
+    const isVirtual = p.modality === 'virtual';
+    const venueLabel = isVirtual ? 'Joining link' : 'Location';
+    const venuePlaceholder = isVirtual ? 'https://…' : 'Building 2 — Training Room';
+    const venueValue = isVirtual ? p.virtualLink : p.location;
+    const instructorName = (p.instructors[0] && p.instructors[0].name) || '';
+    const regPath = (p.registrationModes || []).indexOf('approval-required') > -1 ? 'approval-required' : 'open-registration';
+    const attendance = (p.registrationModes || []).indexOf('attendance-tracked') > -1;
+
+    const cadenceOption = function (value, label) {
+      return `<option value="${value}" ${p.cadence === value ? 'selected' : ''}>${label}</option>`;
+    };
+
+    DOM.proposalForm.innerHTML = ''
+      + '<div class="event-proposal-grid">'
+      + `<div class="event-field event-proposal-wide"><label for="event-proposal-title">Event name</label><input id="event-proposal-title" value="${escapeHtml(p.title)}" /></div>`
+      + `<div class="event-field"><label for="event-proposal-count">Sessions</label><input type="number" id="event-proposal-count" min="1" max="${MAX_QUICK_SESSIONS}" value="${escapeHtml(String(p.sessionCount))}" /></div>`
+      + `<div class="event-field"><label for="event-proposal-cadence">Cadence</label><select id="event-proposal-cadence">${cadenceOption('sameday', 'Same day')}${cadenceOption('weekly', 'Weekly')}${cadenceOption('daily', 'Daily')}</select></div>`
+      + `<div class="event-field"><label for="event-proposal-date">First date</label><input type="date" id="event-proposal-date" value="${escapeHtml(p.date)}" /></div>`
+      + `<div class="event-field"><label for="event-proposal-start">Starts</label><input type="time" id="event-proposal-start" value="${escapeHtml(p.startTime)}" /></div>`
+      + `<div class="event-field"><label for="event-proposal-end">Ends</label><input type="time" id="event-proposal-end" value="${escapeHtml(p.endTime)}" /></div>`
+      + `<div class="event-field"><label for="event-proposal-modality">Where</label><select id="event-proposal-modality"><option value="physical" ${isVirtual ? '' : 'selected'}>In person</option><option value="virtual" ${isVirtual ? 'selected' : ''}>Virtual</option></select></div>`
+      + `<div class="event-field event-proposal-wide"><label for="event-proposal-venue">${venueLabel}</label><input id="event-proposal-venue" placeholder="${escapeHtml(venuePlaceholder)}" value="${escapeHtml(venueValue)}" /></div>`
+      + `<div class="event-field event-proposal-wide"><label for="event-proposal-instructor">Instructor</label><input id="event-proposal-instructor" placeholder="Full name" value="${escapeHtml(instructorName)}" /></div>`
+      + `<div class="event-field"><label for="event-proposal-registration">Registration</label><select id="event-proposal-registration"><option value="open-registration" ${regPath === 'open-registration' ? 'selected' : ''}>Open</option><option value="approval-required" ${regPath === 'approval-required' ? 'selected' : ''}>Approval required</option></select></div>`
+      + `<div class="event-field event-proposal-check"><label for="event-proposal-attendance"><input type="checkbox" id="event-proposal-attendance" ${attendance ? 'checked' : ''} /> Track attendance</label></div>`
+      + '</div>'
+      + '<div class="event-proposal-gaps" id="event-proposal-gaps"></div>'
+      + '<div class="event-quick-actions">'
+      + '<button type="button" class="event-publish-submit" id="event-proposal-build">Build event</button>'
+      + '<span class="event-quick-secondary">or <button type="button" class="event-template-blank-link" id="event-proposal-back">back</button></span>'
+      + '</div>';
+
+    renderProposalGaps();
+  }
+
+  function syncProposalFromForm() {
+    const p = state.proposalParams || (state.proposalParams = normalizeProposalParams({}));
+    const val = function (id) { const el = document.getElementById(id); return el ? el.value : ''; };
+    p.title = cleanText(val('event-proposal-title')) || p.title;
+    p.sessionCount = clampSessionCount(val('event-proposal-count'));
+    p.cadence = val('event-proposal-cadence') || 'sameday';
+    p.date = val('event-proposal-date') || '';
+    p.dateExplicit = Boolean(p.date);
+    p.startTime = val('event-proposal-start') || p.startTime;
+    p.endTime = val('event-proposal-end') || p.endTime;
+    p.modality = val('event-proposal-modality') === 'virtual' ? 'virtual' : 'physical';
+    const venue = cleanText(val('event-proposal-venue'));
+    if (p.modality === 'virtual') { p.virtualLink = venue; p.location = ''; }
+    else { p.location = venue; p.virtualLink = ''; }
+    const instr = cleanText(val('event-proposal-instructor'));
+    p.instructors = instr ? [{ name: instr, email: '' }] : [];
+    const modes = [val('event-proposal-registration') === 'approval-required' ? 'approval-required' : 'open-registration'];
+    const attendance = document.getElementById('event-proposal-attendance');
+    if (attendance && attendance.checked) modes.push('attendance-tracked');
+    p.registrationModes = modes;
+  }
+
+  function openProposalReview(params) {
+    if (!DOM.proposal || !DOM.proposalForm) return false;
+    state.proposalParams = normalizeProposalParams(params);
+    setColdStart(false);
+    setProposalMode(true);
+    renderProposalReview();
+    clearAlert();
+    const titleInput = document.getElementById('event-proposal-title');
+    if (titleInput) titleInput.focus();
+    return true;
+  }
+
+  function buildFromProposal() {
+    syncProposalFromForm();
+    const result = buildDraftFromParams(state.proposalParams);
+    state.proposalParams = null;
+    setProposalMode(false);
+    loadGeneratedDraft(result.draft, { skipConfirm: true });
+    if (typeof state.onEventBuilt === 'function') state.onEventBuilt();
+  }
+
+  function backFromProposal() {
+    state.proposalParams = null;
+    setProposalMode(false);
+    showColdStart();
+    if (DOM.aiInput) DOM.aiInput.focus();
+  }
+
   function confirmReplaceDraft(message) {
     if (!state.draft || !state.draft.meta.isDirty) return true;
     return window.confirm(message);
@@ -2423,19 +2727,21 @@
 
     setQuickError('');
     loadDraft(createQuickDraft(input));
+    setRevealViewMode();
+    state.revealNodes = true;
 
     // Open on the session rather than Basics: the session is what the admin just
     // described, and it is where a second session gets added from.
     const sessionId = state.draft.sessions[0];
     if (sessionId) {
       state.selectedNodeId = sessionId;
-      renderAll();
     }
+    renderAll();
 
     saveDraft(false);
     hideColdStart();
     frameGraphForIntro();
-    showToast('Event created. Review the canvas, then publish.', 5000);
+    showToast('Event created. Review it, then publish.', 5000);
     return true;
   }
 
@@ -2500,6 +2806,54 @@
     syncQuickShape();
   }
 
+  // Applies the human's inline edits from an editable chat structure card onto a
+  // freshly-seeded plan draft. Basics and Registration write to their singleton
+  // nodes; sessions map by order and seedSessionBranchData merges only the passed
+  // fields, so seeded venue/instructors/times survive. Empty fields keep the seed.
+  function applyPlanEdits(draft, edits) {
+    if (!edits) return;
+
+    if (edits.basics) {
+      const basicsId = findSingletonNodeId(draft, NODE_TYPES.BASICS);
+      if (basicsId) {
+        const payload = draft.payloadByNodeId[basicsId] || {};
+        const title = cleanText(edits.basics.title);
+        const description = cleanText(edits.basics.description);
+        const spot = cleanText(edits.basics.spot);
+        if (title) payload.title = title;
+        if (description) payload.description = description;
+        if (spot) payload.spot = spot;
+        draft.payloadByNodeId[basicsId] = payload;
+      }
+    }
+
+    if (edits.registration) {
+      const regId = findSingletonNodeId(draft, NODE_TYPES.REGISTRATION);
+      if (regId) {
+        const path = edits.registration.path === 'approval-required' ? 'approval-required' : 'open-registration';
+        const modes = [path];
+        if (edits.registration.attendance) modes.push('attendance-tracked');
+        draft.payloadByNodeId[regId] = { modes: modes };
+      }
+    }
+
+    (edits.sessions || []).forEach(function (edit, i) {
+      const sessionId = draft.sessions[i];
+      if (!sessionId) return;
+      const name = cleanText(edit.name);
+      const capacity = cleanText(edit.capacity);
+      const date = cleanText(edit.date);
+      const timezone = cleanText(edit.timezone);
+      seedSessionBranchData(draft, sessionId, {
+        title: name ? (/certification/i.test(name) ? name : name + ' Certification') : undefined,
+        track: name || undefined,
+        capacity: capacity || undefined,
+        date: date || undefined,
+        timezone: timezone || undefined
+      });
+    });
+  }
+
   function buildFromPlan(planId, options) {
     const opts = options || {};
     const plan = EVENT_PLANS[planId];
@@ -2517,21 +2871,24 @@
 
     const draft = plan.createDraft();
     draft.meta.planId = planId;
+    if (opts.edits) applyPlanEdits(draft, opts.edits);
     loadDraft(draft);
+    setRevealViewMode();
+    state.revealNodes = true;
 
     // Open on the sessions rail rather than the default first node: it lists
-    // every branch and renders the cross-session checks, which is what the
+    // every session and renders the cross-session checks, which is what the
     // assistant is talking about the moment the build lands.
     const sessionsId = findSingletonNodeId(state.draft, NODE_TYPES.SESSIONS);
     if (sessionsId) {
       state.selectedNodeId = sessionsId;
-      renderAll();
     }
+    renderAll();
 
     saveDraft(false);
     hideColdStart();
     frameGraphForIntro();
-    showToast(`${plan.label} built on the canvas.`, 4000);
+    showToast(`${plan.label} built. Review it, then publish.`, 4000);
     return true;
   }
 
@@ -2618,13 +2975,26 @@
   function openWorkspace(options) {
     const opts = options || {};
 
+    // Chat-first callers land straight on the canvas artifact. Set the view
+    // before building so the initial paint is already in the requested mode.
+    // On narrow screens the spatial map is a poor fit, so fall back to the
+    // outline, which the toggle still lets the admin switch to the map from.
+    const isNarrowViewport = typeof window.innerWidth === 'number' && window.innerWidth > 0 && window.innerWidth < 760;
+    if (opts.viewMode === 'map') {
+      state.viewMode = isNarrowViewport ? 'outline' : 'map';
+    } else if (opts.viewMode === 'outline') {
+      state.viewMode = 'outline';
+    }
+
     if (opts.newEvent) {
       startNewDraft();
       return;
     }
 
     if (opts.plan) {
-      buildFromPlan(opts.plan, { skipConfirm: Boolean(opts.skipConfirm) });
+      buildFromPlan(opts.plan, { skipConfirm: Boolean(opts.skipConfirm), edits: opts.planEdits });
+    } else if (opts.proposalParams) {
+      openProposalReview(opts.proposalParams);
     } else if (opts.generatedDraft) {
       loadGeneratedDraft(opts.generatedDraft, { skipConfirm: Boolean(opts.skipConfirm) });
     } else if (opts.template) {
@@ -2633,6 +3003,12 @@
       openScratchWithBasics(opts.basicsTitle, { skipConfirm: opts.skipConfirm });
     } else if (state.isInitialized && state.draft && !state.draft.meta.templateChosen && !state.draft.nodes.length) {
       showColdStart();
+    }
+
+    // buildFromPlan already frames the graph; frame the other build paths too so
+    // a map-view landing shows the whole event rather than a corner of it.
+    if (state.viewMode === 'map' && state.draft && !opts.plan && !opts.proposalParams) {
+      frameGraphForIntro();
     }
   }
 
@@ -2719,9 +3095,10 @@
       : '';
     return `
       ${inheritanceRollup}
+      ${renderAudienceField()}
       <div class="event-field">
         <span class="event-inline-label">Session rail</span>
-        <p class="event-helper">Add sessions from the palette, then duplicate, reorder, or remove branches here.</p>
+        <p class="event-helper">Add sessions from the palette, then duplicate, reorder, or remove them here.</p>
         <div class="event-inline-actions">
           <button type="button" class="event-mini-button" data-action="jump-incomplete-session">Jump to incomplete</button>
         </div>
@@ -2847,6 +3224,58 @@
     return '<p class="event-helper">No editable properties for this node.</p>';
   }
 
+  // The agent-synced integration state for one session, shown as read-only pills
+  // in the inspector. This is where "what the agent did" is legible now that the
+  // canvas stays a clean overview.
+  function renderSessionSyncField(sessionId) {
+    const meta = (state.draft && state.draft.meta) || {};
+    const badge = (meta.integrations && meta.integrations.bySession && meta.integrations.bySession[sessionId]) || null;
+    if (!badge) return '';
+    const pills = [];
+    if (badge.enrolled) pills.push(`<span class="event-integration-badge is-enroll">${escapeHtml(badge.enrolled + ' enrolled')}</span>`);
+    if (badge.calendar) pills.push('<span class="event-integration-badge is-calendar">Calendar confirmed</span>');
+    if (badge.room) pills.push(`<span class="event-integration-badge is-room">${escapeHtml(badge.room)}</span>`);
+    if (badge.video) pills.push('<span class="event-integration-badge is-video">Zoom created</span>');
+    if (!pills.length) return '';
+    return `<div class="event-field event-sync-field"><span class="event-inline-label">Synced by agent</span><div class="event-sync-pills">${pills.join('')}</div></div>`;
+  }
+
+  function renderAudienceField() {
+    const meta = (state.draft && state.draft.meta) || {};
+    const audience = meta.audience;
+    if (!audience || !audience.total) return '';
+    const segments = (audience.segments || []).map(function (segment) {
+      return `${segment.label} ${segment.seats}`;
+    }).join(' / ');
+    return `<div class="event-field event-sync-field">
+      <span class="event-inline-label">Audience</span>
+      <p class="event-helper">${escapeHtml(audience.total + ' from ' + audience.source)}${audience.due ? ` \u00b7 due ${escapeHtml(audience.due)}` : ''}${segments ? ` \u00b7 ${escapeHtml(segments)}` : ''}</p>
+    </div>`;
+  }
+
+  // The map is a clean overview, so the click has to pay off: lead the session
+  // form with its key facts (schedule / venue / capacity / instructors) pulled
+  // from the child nodes, above the drill-in list and the agent-synced pills.
+  function renderSessionAtAGlance(sessionId) {
+    const labelByType = {};
+    labelByType[NODE_TYPES.SESSION_SCHEDULE] = 'Schedule';
+    labelByType[NODE_TYPES.SESSION_VENUE] = 'Venue';
+    labelByType[NODE_TYPES.SESSION_CAPACITY] = 'Capacity';
+    labelByType[NODE_TYPES.SESSION_INSTRUCTORS] = 'Instructors';
+    const order = [NODE_TYPES.SESSION_SCHEDULE, NODE_TYPES.SESSION_VENUE, NODE_TYPES.SESSION_CAPACITY, NODE_TYPES.SESSION_INSTRUCTORS];
+    const children = getSessionChildNodes(state.draft, sessionId);
+    const rows = order.map(function (type) {
+      const child = children.find(function (item) { return item.type === type; });
+      if (!child) return '';
+      const value = getNodeSummary(child);
+      // A button, not a div: the glance doubles as the way into each editor, so
+      // clicking a row drills straight into that card's fields.
+      return `<button type="button" class="event-glance-row" data-action="focus-session-child" data-node-id="${child.id}"><span class="event-glance-label">${escapeHtml(labelByType[type])}</span><span class="event-glance-value${hasText(value) ? '' : ' is-empty'}">${hasText(value) ? escapeHtml(value) : 'Not set'}</span></button>`;
+    }).filter(Boolean).join('');
+    if (!rows) return '';
+    return `<div class="event-field event-glance"><span class="event-inline-label">At a glance</span><div class="event-glance-grid">${rows}</div></div>`;
+  }
+
   function renderSessionNodeForm(node) {
     const payload = state.draft.payloadByNodeId[node.id] || {};
     const childSummary = getSessionChildNodes(state.draft, node.id).map(function (child) {
@@ -2855,6 +3284,8 @@
     }).join('');
     return `
       <div class="event-field"><label for="event-session-title">Session name</label><input id="event-session-title" name="session-title" value="${escapeHtml(payload.title || '')}" /><p class="event-helper">Set the schedule, venue, capacity and instructors on the cards below this session.</p></div>
+      ${renderSessionAtAGlance(node.id)}
+      ${renderSessionSyncField(node.id)}
       <div class="event-field"><span class="event-inline-label">Session details</span><ul class="event-session-child-summary">${childSummary || '<li>No details yet.</li>'}</ul></div>
     `;
   }
@@ -2862,7 +3293,10 @@
   function renderForm() {
     const node = state.draft.nodes.find(function (item) { return item.id === state.selectedNodeId; });
     if (!node) {
-      DOM.form.innerHTML = '<p class="event-helper">Pick a card on the canvas to edit it.</p>';
+      const hint = state.viewMode === 'map'
+        ? 'Select any session on the map to see its schedule, venue, capacity, instructors, and what the agent synced here.'
+        : 'Pick a row in the outline to edit it.';
+      DOM.form.innerHTML = `<p class="event-helper">${hint}</p>`;
       return;
     }
     const validation = validateNode(node);
@@ -3266,16 +3700,39 @@
       if (!summaryHost) return;
 
       const program = getProgramSummary() || { sessionCount: 0, instructorCount: 0, conflictCount: 0 };
+      const sync = getEnterpriseSyncSummary();
+      const syncMarkup = sync && sync.hasIntegrations ? `
+        <div class="event-sync-summary" id="event-sync-summary">
+          <h3>Enterprise sync</h3>
+          <ul class="event-sync-list">
+            ${sync.enrolled ? `<li class="event-sync-item is-enroll"><span class="event-sync-provider">Workday Learning</span> enrolled ${sync.enrolled} learner${sync.enrolled === 1 ? '' : 's'}${sync.audience && sync.audience.due ? ` \u00b7 due ${escapeHtml(sync.audience.due)}` : ''}</li>` : ''}
+            ${sync.invites ? `<li class="event-sync-item is-calendar"><span class="event-sync-provider">Outlook</span> sent calendar invites for ${sync.invites} session${sync.invites === 1 ? '' : 's'}</li>` : ''}
+            ${sync.rooms ? `<li class="event-sync-item is-room"><span class="event-sync-provider">Facilities</span> reserved ${sync.rooms} room${sync.rooms === 1 ? '' : 's'}</li>` : ''}
+            ${sync.videos ? `<li class="event-sync-item is-video"><span class="event-sync-provider">Zoom</span> created ${sync.videos} meeting link${sync.videos === 1 ? '' : 's'}</li>` : ''}
+          </ul>
+        </div>
+      ` : '';
+
+      const firstSessionId = state.draft.sessions[0];
+      const firstSchedule = firstSessionId ? getSessionSchedulePayload(firstSessionId) : null;
+      const whenParts = [];
+      if (firstSchedule && firstSchedule.date) whenParts.push(genFormatDateShort(firstSchedule.date));
+      if (firstSchedule && firstSchedule.startTime) {
+        whenParts.push(`${firstSchedule.startTime}\u2013${firstSchedule.endTime}`);
+      }
+      const whenText = whenParts.join(' ');
+      const madeFrom = (state.draft.meta.templateId || state.draft.meta.planId) ? 'Created from a template' : 'Created from scratch';
 
       summaryHost.innerHTML = `
-        <h2>Event published</h2>
-        <p class="event-helper">${escapeHtml(basicsPayload.title || 'Untitled event')} · ${state.draft.sessions.length} session branch(es) · Live in prototype.</p>
+        <h2><span class="event-publish-check" aria-hidden="true">\u2713</span> Event published</h2>
+        <p class="event-helper">${escapeHtml(basicsPayload.title || 'Untitled event')} \u00b7 ${program.sessionCount} session${program.sessionCount === 1 ? '' : 's'}${whenText ? ` \u00b7 starts ${escapeHtml(whenText)}` : ''}.</p>
         <ul>
-          <li>${program.sessionCount} session branch(es), ${program.instructorCount} instructor(s), ${program.conflictCount} unresolved conflict(s)</li>
-          <li>Template: ${escapeHtml(state.draft.meta.templateId || state.draft.meta.planId || 'Blank canvas')}</li>
+          <li>${program.sessionCount} session${program.sessionCount === 1 ? '' : 's'}, ${program.instructorCount} instructor${program.instructorCount === 1 ? '' : 's'}, ${program.conflictCount} unresolved conflict${program.conflictCount === 1 ? '' : 's'}</li>
+          <li>${madeFrom}</li>
           <li>Published at ${publishedAt}</li>
           ${warningNote}
         </ul>
+        ${syncMarkup}
         <button type="button" class="home-task-action" id="workspace-return-to-event-button">Return to event editor</button>
       `;
       summaryHost.classList.remove('is-hidden');
@@ -3477,10 +3934,10 @@
     // A short, deliberate beat so generation reads as work rather than an
     // instant swap; the draft itself is built synchronously.
     window.setTimeout(function () {
-      const result = generateEventDraftFromText(text);
       if (DOM.aiGenerating) DOM.aiGenerating.classList.add('is-hidden');
       if (DOM.aiSubmit) DOM.aiSubmit.disabled = false;
-      loadGeneratedDraft(result.draft, { skipConfirm: true });
+      // The human reviews the parsed plan before it maps out; Build commits it.
+      openProposalReview(parseEventPrompt(text));
       if (DOM.aiInput) DOM.aiInput.value = '';
     }, 620);
   }
@@ -3505,6 +3962,30 @@
     setAiError('');
     DOM.aiInput.focus();
   });
+
+  if (DOM.proposalForm) {
+    DOM.proposalForm.addEventListener('input', function () {
+      syncProposalFromForm();
+      renderProposalGaps();
+    });
+    DOM.proposalForm.addEventListener('change', function (event) {
+      syncProposalFromForm();
+      // Switching modality changes the venue field's label/placeholder, so this
+      // is the one change that needs a full re-render (values are preserved).
+      if (event.target && event.target.id === 'event-proposal-modality') renderProposalReview();
+      else renderProposalGaps();
+    });
+    DOM.proposalForm.addEventListener('click', function (event) {
+      if (!event.target.closest) return;
+      if (event.target.closest('#event-proposal-build')) {
+        event.preventDefault();
+        buildFromProposal();
+      } else if (event.target.closest('#event-proposal-back')) {
+        event.preventDefault();
+        backFromProposal();
+      }
+    });
+  }
 
   DOM.manualToggle && DOM.manualToggle.addEventListener('click', function () {
     if (!DOM.quickManual) return;
@@ -3814,14 +4295,14 @@
     if (rangeMatch) {
       const start = genParseClock(rangeMatch[1]);
       const end = genParseClock(rangeMatch[2]);
-      if (start && end && minutesOf(end) > minutesOf(start)) return { start: start, end: end };
+      if (start && end && minutesOf(end) > minutesOf(start)) return { start: start, end: end, explicit: true };
     }
     const singleMatch = text.match(/(?:at|from|starts?(?:\s+at)?|beginning(?:\s+at)?)\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/i);
     if (singleMatch) {
       const start = genParseClock(singleMatch[1]);
-      if (start) return { start: start, end: clockOf(Math.min(minutesOf(start) + 60, (23 * 60) + 59)) };
+      if (start) return { start: start, end: clockOf(Math.min(minutesOf(start) + 60, (23 * 60) + 59)), explicit: true };
     }
-    return { start: '09:00', end: '10:00' };
+    return { start: '09:00', end: '10:00', explicit: false };
   }
 
   function genToISO(year, monthIndex, day) {
@@ -3947,6 +4428,7 @@
     const modality = genParseModality(lower);
     const location = genParseLocation(text, modality);
     const times = genParseTimeRange(lower);
+    const date = genParseDate(lower);
     return {
       title: genParseTitle(text),
       description: cleanText(text).slice(0, 220),
@@ -3958,14 +4440,25 @@
       virtualLink: location.virtualLink,
       startTime: times.start,
       endTime: times.end,
-      date: genParseDate(lower),
+      // Distinguish "the admin said this" from "we defaulted it" so the review
+      // can flag assumptions honestly rather than presenting guesses as fact.
+      timeExplicit: times.explicit === true,
+      date: date,
+      dateExplicit: Boolean(date),
       instructors: genParseInstructors(text),
       registrationModes: genParseRegistration(lower)
     };
   }
 
   function generateEventDraftFromText(rawText) {
-    const parsed = parseEventPrompt(rawText);
+    return buildDraftFromParams(parseEventPrompt(rawText));
+  }
+
+  // Builds the node draft from an already-parsed (and possibly human-edited)
+  // params object. Splitting this out from parseEventPrompt lets the proposal
+  // review sit in between: parse -> edit -> build.
+  function buildDraftFromParams(params) {
+    const parsed = params || {};
     const timezone = resolveDefaultTimezone();
     const draft = createDraft();
     const basicsId = addNodeByType(draft, NODE_TYPES.BASICS, false);
@@ -4029,19 +4522,57 @@
     };
   }
 
+  // Honestly separates what the admin told us from what we defaulted, so the
+  // review can nudge ("you left the date open") without hiding the guesses.
+  function analyzeProposal(params) {
+    const p = params || {};
+    const items = [];
+    if (!cleanText(p.date)) {
+      items.push({ field: 'date', kind: 'gap', message: 'No date yet — sessions stay undated until you set one.' });
+    }
+    if (!(Array.isArray(p.instructors) && p.instructors.length)) {
+      items.push({ field: 'instructor', kind: 'gap', message: 'No instructor named — add who is teaching.' });
+    }
+    if (p.modality === 'virtual') {
+      if (!cleanText(p.virtualLink)) items.push({ field: 'venue', kind: 'gap', message: 'No joining link yet — add where people join.' });
+    } else if (!cleanText(p.location)) {
+      items.push({ field: 'venue', kind: 'gap', message: 'No venue yet — add where it takes place.' });
+    }
+    if (!p.timeExplicit) {
+      items.push({ field: 'time', kind: 'assumption', message: `Assumed ${p.startTime}\u2013${p.endTime}. Adjust if it is off.` });
+    }
+    if ((p.registrationModes || []).indexOf('approval-required') === -1) {
+      items.push({ field: 'registration', kind: 'assumption', message: 'Assumed open registration.' });
+    }
+    return items;
+  }
+
+  // Non-committal generation: parse + build (for the structure/rationale) but
+  // return the editable params and gaps so the human reviews before mapping.
+  function previewFromText(rawText) {
+    const text = cleanText(rawText);
+    if (!text) return null;
+    const params = parseEventPrompt(text);
+    const built = buildDraftFromParams(params);
+    return { params: params, structure: built.structure, rationale: built.rationale, gaps: analyzeProposal(params) };
+  }
+
   function loadGeneratedDraft(draft, options) {
     const opts = options || {};
     if (!draft) return false;
     if (!opts.skipConfirm && !confirmReplaceDraft('You have unvalidated changes. Build this event anyway?')) return false;
     loadDraft(draft);
+    setRevealViewMode();
+    state.revealNodes = true;
     const sessionsId = findSingletonNodeId(state.draft, NODE_TYPES.SESSIONS);
     if (sessionsId) {
       state.selectedNodeId = sessionsId;
-      renderAll();
     }
+    renderAll();
     saveDraft(false);
     hideColdStart();
-    showToast('Event generated. Review the outline, then publish.', 5000);
+    frameGraphForIntro();
+    showToast('Event generated. Review it, then publish.', 5000);
     return true;
   }
 
@@ -4057,6 +4588,142 @@
     return result;
   }
 
+  // Snapshot the built event in the agent's language: session ids, titles,
+  // times, venue mode and capacity. The chat layer feeds this to the mocked
+  // enterprise connectors so their proposals line up with what was built.
+  function getEventContext() {
+    if (!state.draft) return null;
+    const basicsId = findSingletonNodeId(state.draft, NODE_TYPES.BASICS);
+    const basics = basicsId ? (state.draft.payloadByNodeId[basicsId] || {}) : {};
+    const regId = findSingletonNodeId(state.draft, NODE_TYPES.REGISTRATION);
+    const registrationModes = regId ? ((state.draft.payloadByNodeId[regId] || {}).modes || []).slice() : [];
+    const sessions = (state.draft.sessions || []).map(function (sessionId) {
+      const schedule = getSessionSchedulePayload(sessionId);
+      const venue = getSessionVenuePayload(sessionId);
+      const capacity = getSessionChildPayload(state.draft, sessionId, NODE_TYPES.SESSION_CAPACITY);
+      const instructors = (getSessionInstructorsPayload(sessionId).entries || []).map(function (person) {
+        return cleanText(person && person.name);
+      }).filter(Boolean);
+      return {
+        id: sessionId,
+        title: getSessionTitle(sessionId),
+        date: schedule.date || '',
+        startTime: schedule.startTime || '',
+        endTime: schedule.endTime || '',
+        timezone: schedule.timezone || '',
+        venueMode: venue.venueMode || '',
+        location: venue.location || '',
+        capacity: capacity.capacity || '',
+        instructors: instructors
+      };
+    });
+    return {
+      eventTitle: basics.title || '',
+      eventSpot: basics.spot || '',
+      planId: state.draft.meta.planId || '',
+      registrationModes: registrationModes,
+      sessions: sessions
+    };
+  }
+
+  function setSessionChildData(sessionId, type, patch) {
+    const child = state.draft.nodes.find(function (node) {
+      return node.parentSessionId === sessionId && node.type === type;
+    });
+    if (!child) return;
+    const payload = ensureNodePayload(child.id, type);
+    Object.keys(patch).forEach(function (key) { payload[key] = patch[key]; });
+  }
+
+  // Applies an enterprise-connector result to the draft: writes real values into
+  // the session detail nodes (so the canvas summaries update) and records badge
+  // state on meta.integrations so the canvas can show what synced.
+  function applyEnterprise(update) {
+    if (!state.draft || !update) return null;
+    const meta = state.draft.meta;
+    meta.integrations = meta.integrations || { bySession: {} };
+    meta.integrations.bySession = meta.integrations.bySession || {};
+    const changed = {};
+
+    function stampBadge(sessionId, patch) {
+      meta.integrations.bySession[sessionId] = Object.assign(
+        {}, meta.integrations.bySession[sessionId] || {}, patch
+      );
+      changed[sessionId] = true;
+    }
+
+    if (update.audience) {
+      meta.audience = {
+        source: update.audience.source || 'LMS',
+        total: update.audience.total || 0,
+        due: update.audience.due || '',
+        segments: update.audience.segments || []
+      };
+      (update.audience.perSession || []).forEach(function (segment) {
+        if (!segment.sessionId || !segment.seats) return;
+        setSessionChildData(segment.sessionId, NODE_TYPES.SESSION_CAPACITY, { capacity: String(segment.seats) });
+        stampBadge(segment.sessionId, { enrolled: segment.seats, segment: segment.label });
+      });
+    }
+
+    (update.schedules || []).forEach(function (schedule) {
+      if (!schedule.sessionId) return;
+      setSessionChildData(schedule.sessionId, NODE_TYPES.SESSION_SCHEDULE, {
+        date: schedule.date,
+        startTime: schedule.startTime,
+        endTime: schedule.endTime,
+        timezone: schedule.timezone || resolveDefaultTimezone()
+      });
+      stampBadge(schedule.sessionId, { calendar: schedule.label || 'Calendar confirmed' });
+    });
+
+    (update.venues || []).forEach(function (venue) {
+      if (!venue.sessionId) return;
+      const patch = { venueMode: venue.venueMode };
+      if (venue.venueMode === 'virtual') patch.virtualLink = venue.link || '';
+      else patch.location = venue.location || '';
+      setSessionChildData(venue.sessionId, NODE_TYPES.SESSION_VENUE, patch);
+      const badge = {};
+      if (venue.room) badge.room = venue.room;
+      if (venue.video) badge.video = venue.video;
+      stampBadge(venue.sessionId, badge);
+    });
+
+    state.aiChangedNodeIds = {};
+    Object.keys(changed).forEach(function (sessionId) { state.aiChangedNodeIds[sessionId] = true; });
+
+    computeConflicts(state.draft);
+    markDirty();
+    renderAll();
+    return { changedSessions: Object.keys(changed).length };
+  }
+
+  // Rolls up what the connectors synced, for the publish confirmation.
+  function getEnterpriseSyncSummary() {
+    if (!state.draft) return null;
+    const meta = state.draft.meta || {};
+    const bySession = (meta.integrations && meta.integrations.bySession) || {};
+    let enrolled = 0;
+    let invites = 0;
+    let rooms = 0;
+    let videos = 0;
+    Object.keys(bySession).forEach(function (sessionId) {
+      const badge = bySession[sessionId] || {};
+      if (badge.enrolled) enrolled += Number(badge.enrolled) || 0;
+      if (badge.calendar) invites += 1;
+      if (badge.room) rooms += 1;
+      if (badge.video) videos += 1;
+    });
+    return {
+      audience: meta.audience || null,
+      enrolled: enrolled,
+      invites: invites,
+      rooms: rooms,
+      videos: videos,
+      hasIntegrations: enrolled > 0 || invites > 0 || rooms > 0 || videos > 0
+    };
+  }
+
   window.ArcticEventAdmin = {
     openWorkspace: openWorkspace,
     saveDraftLocal: saveDraftLocal,
@@ -4067,10 +4734,20 @@
     createQuickEvent: createQuickEvent,
     buildFromPlan: buildFromPlan,
     generateFromText: generateFromText,
+    previewFromText: previewFromText,
+    buildDraftFromParams: buildDraftFromParams,
+    applyEventEdit: applyEventEdit,
+    openProposalReview: openProposalReview,
     loadGeneratedDraft: loadGeneratedDraft,
     getConflicts: getConflicts,
     resolveConflict: resolveConflict,
-    getProgramSummary: getProgramSummary
+    getProgramSummary: getProgramSummary,
+    getEventContext: getEventContext,
+    applyEnterprise: applyEnterprise,
+    getEnterpriseSyncSummary: getEnterpriseSyncSummary,
+    getViewMode: function () { return state.viewMode; },
+    setNodeFocusHandler: function (handler) { state.onNodeFocus = typeof handler === 'function' ? handler : null; },
+    setEventBuiltHandler: function (handler) { state.onEventBuilt = typeof handler === 'function' ? handler : null; }
   };
 
   initializeEditor();

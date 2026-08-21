@@ -1189,6 +1189,97 @@ body.resizing-panel {
   width: 100%;
 }
 
+/* Agent "thinking" loading state: sparkle + cycling status phrase + a
+   decorative chevron, shown briefly before the streamed reply replaces it. */
+.ai-thinking {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+
+.ai-thinking-spark {
+  color: #5b8def;
+  animation: ai-thinking-spark-pulse 1.2s var(--polar-motion-easing-standard) infinite;
+}
+
+.ai-thinking-label {
+  background: linear-gradient(90deg, var(--text-secondary) 0%, var(--text-primary) 50%, var(--text-secondary) 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: ai-thinking-shimmer 1.6s linear infinite;
+}
+
+.ai-thinking-chevron {
+  color: var(--text-secondary);
+  opacity: 0.5;
+  font-size: var(--text-xs);
+  pointer-events: none;
+}
+
+@keyframes ai-thinking-spark-pulse {
+  0%, 100% { opacity: 0.5; transform: scale(0.92); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes ai-thinking-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Blinking caret on the text node currently being typed. */
+.ai-stream-active::after {
+  content: '\258d';
+  margin-left: 1px;
+  color: #5b8def;
+  animation: ai-stream-caret 0.9s steps(1) infinite;
+}
+
+@keyframes ai-stream-caret {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+/* Cards/actions defer their entrance until the text finishes typing. Pending
+   attachments are removed from layout so a still-typing message is only as tall
+   as its text (no reserved height that would jump the scroll). */
+.ai-response .is-stream-pending {
+  display: none;
+}
+
+.ai-response .is-stream-in {
+  animation: ai-attachment-in var(--polar-motion-duration-medium) var(--polar-motion-easing-enter);
+}
+
+@keyframes ai-attachment-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-thinking-spark,
+  .ai-thinking-label {
+    animation: none;
+  }
+
+  .ai-thinking-label {
+    -webkit-text-fill-color: var(--text-primary);
+    color: var(--text-primary);
+  }
+
+  .ai-stream-active::after {
+    content: none;
+  }
+
+  .ai-response .is-stream-in {
+    animation: none;
+  }
+}
+
 .ai-response-text {
   line-height: 1.55;
   color: var(--text-secondary);
@@ -1225,6 +1316,12 @@ body.resizing-panel {
 .ai-response-action:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.ai-structure-actions {
+  margin: var(--space-md) 0 0;
+  padding-top: var(--space-sm);
+  border-top: 1px solid rgba(51, 78, 92, 0.12);
 }
 
 /* Inline preview of a proposed node map, mirroring the canvas spine. */
@@ -1299,6 +1396,270 @@ body.resizing-panel {
 }
 
 .ai-structure-branch-detail {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+/* Editable structure card: each region row becomes a compact grid of inputs the
+   human can tune before building. Falls back to the read-only rows above. */
+.ai-structure-branches.is-editable {
+  gap: var(--space-2xs);
+}
+
+.ai-structure-section > .ai-structure-branches.is-editable {
+  margin: 0;
+  padding: 0;
+  border-top: 0;
+}
+
+.ai-structure-branches.is-editable li.ai-structure-branch {
+  display: grid;
+  grid-template-columns: 1.1fr 0.6fr 1fr 1.2fr;
+  align-items: end;
+  gap: var(--space-2xs);
+}
+
+.ai-structure-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ai-structure-field-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+}
+
+.ai-structure-input {
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-3xs) var(--space-2xs);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xs);
+  background: #FFFFFF;
+  font-family: inherit;
+  font-size: var(--text-xs);
+  color: var(--text-primary);
+}
+
+.ai-structure-input:focus-visible {
+  outline: 2px solid rgba(74, 144, 164, 0.6);
+  outline-offset: 1px;
+}
+
+.ai-structure-input:is(select) {
+  padding-right: var(--space-lg);
+  cursor: pointer;
+}
+
+textarea.ai-structure-input {
+  resize: vertical;
+  line-height: 1.4;
+}
+
+/* Editable card: numbered sections carry their own editors (Basics, Registration,
+   Sessions), reusing the spine's numbered-badge look for each heading. */
+.ai-structure-sections {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  counter-reset: ai-structure-step;
+}
+
+.ai-structure-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-sm);
+  border: 1px solid rgba(51, 78, 92, 0.12);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.48);
+  counter-increment: ai-structure-step;
+}
+
+.ai-structure-section-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  padding-bottom: var(--space-2xs);
+  border-bottom: 1px solid rgba(51, 78, 92, 0.1);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ai-structure-section-title::before {
+  content: counter(ai-structure-step);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border-radius: var(--radius-xs);
+  background: #E6EBF0;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ai-structure-field-wide {
+  width: 100%;
+}
+
+.ai-structure-registration {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-sm);
+}
+
+.ai-structure-registration .ai-structure-field {
+  min-width: 160px;
+}
+
+.ai-structure-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3xs);
+  padding-bottom: var(--space-3xs);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+/* In-chat requirements form (Agent Center pattern): grouped, prefilled fields
+   inside an AI response bubble. Inputs inherit .event-field styling. */
+.ai-requirements-form {
+  margin-top: var(--space-sm);
+  padding: var(--space-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-glass);
+  backdrop-filter: var(--glass-panel-blur);
+}
+
+.ai-requirements-title {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ai-requirements-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+}
+
+.ai-requirements-group-label {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.ai-requirements-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2xs) var(--space-sm);
+}
+
+.ai-requirements-wide {
+  grid-column: 1 / -1;
+}
+
+.ai-requirements-form .event-field textarea {
+  min-height: 56px;
+}
+
+.ai-requirements-refs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+}
+
+.ai-requirements-ref-hint {
+  font-size: var(--text-xs);
+  color: #99a6ad;
+}
+
+.ai-requirements-ref-add {
+  font-family: var(--font-family-base);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: none;
+  border: 1px dashed rgba(51, 78, 92, 0.3);
+  border-radius: var(--radius-xs);
+  padding: 2px var(--space-2xs);
+  cursor: default;
+}
+
+.ai-requirements-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2xs);
+  justify-content: flex-end;
+}
+
+.ai-requirements-form input:disabled,
+.ai-requirements-form textarea:disabled,
+.ai-requirements-form select:disabled,
+.ai-requirements-form button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* "Successfully generated / Review in Canvas" card. */
+.ai-generated-card {
+  margin-top: var(--space-sm);
+  padding: var(--space-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-glass);
+  backdrop-filter: var(--glass-panel-blur);
+}
+
+.ai-generated-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+}
+
+.ai-generated-name {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ai-generated-chip {
+  flex: none;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 1px 8px;
+  border-radius: 9999px;
+  background: #C7D2DC;
+  color: var(--text-primary);
+}
+
+.ai-generated-label {
   font-size: var(--text-xs);
   color: var(--text-secondary);
 }
@@ -2316,6 +2677,57 @@ a.switcher-nav-link {
   line-height: var(--line-height-relaxed);
 }
 
+/* Publish confirmation: what the agent pushed to the connected systems. */
+.event-sync-summary {
+  margin-top: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid rgba(42, 186, 248, 0.28);
+  border-radius: var(--radius-sm);
+  background: rgba(245, 251, 255, 0.7);
+}
+
+.event-sync-summary h3 {
+  margin: 0 0 var(--space-2xs);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+
+.event-sync-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--space-3xs);
+}
+
+.event-sync-item {
+  position: relative;
+  padding-left: var(--space-md);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--line-height-relaxed);
+}
+
+.event-sync-item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.55em;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(42, 186, 248, 0.6);
+}
+
+.event-sync-item.is-calendar::before { background: rgba(120, 132, 242, 0.7); }
+.event-sync-item.is-room::before { background: rgba(76, 178, 130, 0.75); }
+.event-sync-item.is-video::before { background: rgba(240, 150, 80, 0.75); }
+
+.event-sync-provider {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
 .workspace-event-editor {
   flex: 1;
   min-height: 0;
@@ -2519,6 +2931,29 @@ a.switcher-nav-link {
   background: rgba(255, 255, 255, 0.42);
 }
 
+/* One-shot flash when a node is picked on the map, so the click's payoff in this
+   far-right column is impossible to miss. */
+.event-admin-main-panel.is-attn {
+  animation: event-panel-attn 0.9s var(--polar-motion-easing-standard);
+}
+
+@keyframes event-panel-attn {
+  0% {
+    background: rgba(42, 186, 248, 0.16);
+    box-shadow: inset 3px 0 0 0 rgba(42, 186, 248, 0.85);
+  }
+  100% {
+    background: rgba(255, 255, 255, 0.42);
+    box-shadow: inset 3px 0 0 0 rgba(42, 186, 248, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .event-admin-main-panel.is-attn {
+    animation: none;
+  }
+}
+
 .event-admin-nav-title-row,
 .event-admin-main-header {
   display: flex;
@@ -2643,12 +3078,101 @@ a.switcher-nav-link {
 
 /* Cold start owns the panel until an event exists, so the builder grid stands
    down rather than framing a form that is asking the same question. */
-.event-admin-panel.is-cold-start .event-admin-layout {
+.event-admin-panel.is-cold-start .event-admin-layout,
+.event-admin-panel.is-proposal .event-admin-layout {
   display: none;
 }
 
 .event-cold-start.is-hidden {
   display: none;
+}
+
+/* Proposal review: the pre-map human checkpoint. Shares the cold start's
+   panel-filling, scrollable card treatment. */
+.event-proposal.is-hidden {
+  display: none;
+}
+
+.event-proposal {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  overflow: auto;
+  padding: var(--space-lg);
+}
+
+.event-proposal-card {
+  width: 100%;
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.event-proposal-header h3 {
+  margin: 0 0 4px;
+}
+
+.event-proposal-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.event-proposal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-sm) var(--space-md);
+}
+
+.event-proposal-wide {
+  grid-column: 1 / -1;
+}
+
+.event-proposal-check {
+  align-self: end;
+}
+
+.event-proposal-check label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.event-proposal-gap-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.event-proposal-gap {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: var(--text-sm);
+}
+
+.event-proposal-gap-kind {
+  flex: none;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 9999px;
+}
+
+.event-proposal-gap.is-gap .event-proposal-gap-kind {
+  background: rgba(240, 150, 40, 0.16);
+  color: #9a5a00;
+}
+
+.event-proposal-gap.is-assumption .event-proposal-gap-kind {
+  background: rgba(42, 186, 248, 0.14);
+  color: #12779e;
 }
 
 .event-cold-start {
@@ -2899,7 +3423,7 @@ a.switcher-nav-link {
   box-sizing: border-box;
   cursor: pointer;
   user-select: none;
-  transition: border-color var(--polar-motion-duration-fast) var(--polar-motion-easing-standard), background var(--polar-motion-duration-fast) var(--polar-motion-easing-standard);
+  transition: border-color var(--polar-motion-duration-fast) var(--polar-motion-easing-standard), background var(--polar-motion-duration-fast) var(--polar-motion-easing-standard), box-shadow var(--polar-motion-duration-fast) var(--polar-motion-easing-standard), transform var(--polar-motion-duration-fast) var(--polar-motion-easing-standard);
 }
 
 .event-canvas-node:hover {
@@ -2910,6 +3434,90 @@ a.switcher-nav-link {
 .event-canvas-node-session {
   border-color: rgba(42, 186, 248, 0.45);
   background: rgba(245, 251, 255, 0.92);
+}
+
+/* Integration pills the agent synced. They sit just below the node in the gap
+   before its children, so the node keeps its fixed height while "what synced"
+   stays legible on the canvas artifact. */
+.event-canvas-node-session,
+.event-canvas-node {
+  overflow: visible;
+}
+
+.event-sync-field .event-sync-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3xs);
+  margin-top: var(--space-3xs);
+}
+
+.event-glance-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3xs);
+  margin-top: var(--space-3xs);
+}
+
+.event-glance-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-sm);
+}
+
+.event-glance-label {
+  font-size: var(--text-xs);
+  color: rgba(51, 78, 92, 0.7);
+}
+
+.event-glance-value {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: rgba(28, 44, 54, 0.95);
+  text-align: right;
+}
+
+.event-glance-value.is-empty {
+  font-weight: 500;
+  color: rgba(51, 78, 92, 0.5);
+}
+
+.event-integration-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-xs);
+  padding: 1px var(--space-2xs);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.event-integration-badge.is-audience {
+  background: rgba(42, 186, 248, 0.14);
+  color: rgba(28, 118, 156, 0.95);
+  border-color: rgba(42, 186, 248, 0.28);
+}
+
+.event-integration-badge.is-enroll {
+  background: rgba(42, 186, 248, 0.12);
+  color: rgba(28, 118, 156, 0.95);
+}
+
+.event-integration-badge.is-calendar {
+  background: rgba(120, 132, 242, 0.14);
+  color: rgba(78, 88, 196, 0.95);
+}
+
+.event-integration-badge.is-room {
+  background: rgba(76, 178, 130, 0.16);
+  color: rgba(38, 120, 84, 0.95);
+}
+
+.event-integration-badge.is-video {
+  background: rgba(240, 150, 80, 0.16);
+  color: rgba(178, 96, 32, 0.95);
 }
 
 .event-canvas-node-ghost {
@@ -2982,8 +3590,10 @@ a.switcher-nav-link {
 }
 
 .event-canvas-node.is-active {
-  border-color: rgba(42, 186, 248, 0.7);
-  box-shadow: inset 0 0 0 1px rgba(42, 186, 248, 0.25);
+  border-color: rgba(42, 186, 248, 0.9);
+  background: #fff;
+  box-shadow: 0 0 0 2px rgba(42, 186, 248, 0.35), 0 6px 16px rgba(42, 186, 248, 0.18);
+  transform: translateY(-1px);
 }
 
 /* Marks a node the assistant just edited. Brief and quiet per design.md.
@@ -3007,6 +3617,55 @@ a.switcher-nav-link {
 
 @media (prefers-reduced-motion: reduce) {
   .event-canvas-node.is-ai-changed {
+    animation: none;
+  }
+}
+
+/* Build reveal: freshly generated nodes stagger onto the map on the first paint,
+   dramatizing "the AI built this". Enter easing + medium duration per the Polar
+   Motion tokens; the per-node delay is set inline. `both` holds the start state
+   through the delay so the stagger reads. */
+.event-canvas-node.is-revealing {
+  animation: event-canvas-node-in var(--polar-motion-duration-medium) var(--polar-motion-easing-enter) both;
+  animation-delay: var(--reveal-delay, 0ms);
+}
+
+@keyframes event-canvas-node-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .event-canvas-node.is-revealing {
+    animation: none;
+  }
+}
+
+/* Publish confirmation: a small accent check that scales in beside the heading,
+   marking the finish. Token-aligned enter motion; reduced-motion drops it. */
+.event-publish-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-right: 6px;
+  border-radius: 9999px;
+  background: #2ABAF8;
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  vertical-align: middle;
+  animation: event-publish-check-in var(--polar-motion-duration-medium) var(--polar-motion-easing-enter) both;
+}
+
+@keyframes event-publish-check-in {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .event-publish-check {
     animation: none;
   }
 }
