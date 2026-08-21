@@ -258,11 +258,37 @@ Navigation items should remain compact and use a pale hover or selected backgrou
 
 Motion should be quick and subtle.
 
-Existing patterns use:
+Motion uses the **Polar Motion (Arctic Flow)** token layer, adapted from the `polar-motion` skill. Only the token layer applies to this static kit — the skill's React/CSS-Modules setup and `storybook-polar` MCP "query the Polar component first" workflow are not used here (there are no Polar UI components in the DOM). Do not hardcode durations or easings; reference the tokens defined in `:root`.
 
-- `0.1s ease-out` for panel resizing
-- `0.2s ease` for hover color changes
-- `220ms cubic-bezier(0.22, 1, 0.36, 1)` for card hover lift
+### Duration tokens
+
+- `--polar-motion-duration-instant`: `0ms`
+- `--polar-motion-duration-fast`: `100ms` (hover/focus color, small state changes, canvas controls, panel resize)
+- `--polar-motion-duration-medium`: `300ms` (card hover lift, toast enter, list-row enter)
+- `--polar-motion-duration-slow`: `500ms`
+- `--polar-motion-duration-delight`: `800ms`
+
+### Easing tokens
+
+- `--polar-motion-easing-standard`: `cubic-bezier(0.2, 0, 0, 1)` (state changes, hover)
+- `--polar-motion-easing-enter`: `cubic-bezier(0, 0, 0.2, 1)` (open/appear)
+- `--polar-motion-easing-exit`: `cubic-bezier(0.3, 0, 1, 1)` (close/dismiss)
+
+Use `enter` for openings and `exit` for closings; never `ease-in` on an opening. Transition explicit properties (`opacity`, `transform`, `background-color`, ...), never `transition: all`.
+
+### Composite dialog/overlay profiles
+
+For overlay/dialog-pattern surfaces, use one composite profile (start `scale` -> 1 over `--polar-motion-duration-medium`, `enter` easing), with any backdrop fading in sync:
+
+- `--polar-motion-dialog-subtle-scale` (`0.97`) — Polar `Prompt`.
+- `--polar-motion-dialog-standard-scale` (`0.95`) — Polar `Dialog`. Applied to the omnibox search panel (`.omnibox-panel`), backdrop fades in sync.
+- `--polar-motion-dialog-expressive-scale` (`0.9`) — Polar `Dialog.Navigation`. Applied to the page-switcher popover (`.page-switcher-popover`), origin near the trigger corner.
+
+These animate on open (keyed off `[aria-hidden="false"]`); close is currently instant because the surfaces hide via `display: none`.
+
+Intentional exceptions live outside the token scale because they are not state/enter/exit transitions: the continuous loading spinner (`event-ai-spin`, linear infinite) and the one-shot AI attention pulse (`event-node-ai-pulse`).
+
+Always respect `prefers-reduced-motion: reduce`: keep state changes instant and drop transforms/keyframes.
 
 Use motion to clarify interaction state, not to create decoration. Avoid long transitions, bouncy animations, and large movement.
 

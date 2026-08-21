@@ -161,6 +161,24 @@
   /* A tight contact shadow under a broad ambient one, so the toast reads as the
      topmost layer without the dense drop of a single heavy shadow. */
   --toast-shadow: 0 2px 6px rgba(51, 78, 92, 0.1), 0 14px 34px rgba(51, 78, 92, 0.18);
+
+  /* Polar Motion (Arctic Flow) — adapted from the polar-motion skill.
+     Only the token layer applies here; the skill's React/CSS-Modules and
+     storybook-polar MCP workflow does not apply to this static kit. */
+  --polar-motion-duration-instant: 0ms;
+  --polar-motion-duration-fast: 100ms;
+  --polar-motion-duration-medium: 300ms;
+  --polar-motion-duration-slow: 500ms;
+  --polar-motion-duration-delight: 800ms;
+  --polar-motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+  --polar-motion-easing-enter: cubic-bezier(0, 0, 0.2, 1);
+  --polar-motion-easing-exit: cubic-bezier(0.3, 0, 1, 1);
+
+  /* Composite dialog/overlay profiles (start scale -> 1, at --duration-medium):
+     subtle=Prompt, standard=Dialog, expressive=Dialog.Navigation/Support/Canvas. */
+  --polar-motion-dialog-subtle-scale: 0.97;
+  --polar-motion-dialog-standard-scale: 0.95;
+  --polar-motion-dialog-expressive-scale: 0.9;
 }
 
 @media (min-width: 1920px) {
@@ -539,7 +557,7 @@ a {
   z-index: 10;
   pointer-events: auto;
   padding: 0;
-  transition: width 0.1s ease-out;
+  transition: width var(--polar-motion-duration-fast) var(--polar-motion-easing-enter);
 }
 
 /* Drag target for resizing the side panel. */
@@ -551,7 +569,7 @@ a {
   height: 100%;
   cursor: ew-resize;
   background-color: transparent;
-  transition: background-color 0.2s ease;
+  transition: background-color var(--polar-motion-duration-fast) var(--polar-motion-easing-standard);
   z-index: 20;
 }
 
@@ -826,8 +844,8 @@ body.resizing-panel {
   z-index: 1;
   --card-offset-y: 0px;
   transform: translateY(var(--card-offset-y)) scale(1);
-  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: transform var(--polar-motion-duration-medium) var(--polar-motion-easing-standard),
+    box-shadow var(--polar-motion-duration-medium) var(--polar-motion-easing-standard);
   will-change: transform;
 }
 
@@ -1033,6 +1051,10 @@ body.resizing-panel {
   cursor: default;
 }
 
+.home-task-action.is-hidden {
+  display: none;
+}
+
 .home-task-separator {
   width: 73px;
 }
@@ -1167,6 +1189,97 @@ body.resizing-panel {
   width: 100%;
 }
 
+/* Agent "thinking" loading state: sparkle + cycling status phrase + a
+   decorative chevron, shown briefly before the streamed reply replaces it. */
+.ai-thinking {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+
+.ai-thinking-spark {
+  color: #5b8def;
+  animation: ai-thinking-spark-pulse 1.2s var(--polar-motion-easing-standard) infinite;
+}
+
+.ai-thinking-label {
+  background: linear-gradient(90deg, var(--text-secondary) 0%, var(--text-primary) 50%, var(--text-secondary) 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: ai-thinking-shimmer 1.6s linear infinite;
+}
+
+.ai-thinking-chevron {
+  color: var(--text-secondary);
+  opacity: 0.5;
+  font-size: var(--text-xs);
+  pointer-events: none;
+}
+
+@keyframes ai-thinking-spark-pulse {
+  0%, 100% { opacity: 0.5; transform: scale(0.92); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes ai-thinking-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Blinking caret on the text node currently being typed. */
+.ai-stream-active::after {
+  content: '\258d';
+  margin-left: 1px;
+  color: #5b8def;
+  animation: ai-stream-caret 0.9s steps(1) infinite;
+}
+
+@keyframes ai-stream-caret {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+/* Cards/actions defer their entrance until the text finishes typing. Pending
+   attachments are removed from layout so a still-typing message is only as tall
+   as its text (no reserved height that would jump the scroll). */
+.ai-response .is-stream-pending {
+  display: none;
+}
+
+.ai-response .is-stream-in {
+  animation: ai-attachment-in var(--polar-motion-duration-medium) var(--polar-motion-easing-enter);
+}
+
+@keyframes ai-attachment-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-thinking-spark,
+  .ai-thinking-label {
+    animation: none;
+  }
+
+  .ai-thinking-label {
+    -webkit-text-fill-color: var(--text-primary);
+    color: var(--text-primary);
+  }
+
+  .ai-stream-active::after {
+    content: none;
+  }
+
+  .ai-response .is-stream-in {
+    animation: none;
+  }
+}
+
 .ai-response-text {
   line-height: 1.55;
   color: var(--text-secondary);
@@ -1203,6 +1316,12 @@ body.resizing-panel {
 .ai-response-action:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.ai-structure-actions {
+  margin: var(--space-md) 0 0;
+  padding-top: var(--space-sm);
+  border-top: 1px solid rgba(51, 78, 92, 0.12);
 }
 
 /* Inline preview of a proposed node map, mirroring the canvas spine. */
@@ -1277,6 +1396,270 @@ body.resizing-panel {
 }
 
 .ai-structure-branch-detail {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+/* Editable structure card: each region row becomes a compact grid of inputs the
+   human can tune before building. Falls back to the read-only rows above. */
+.ai-structure-branches.is-editable {
+  gap: var(--space-2xs);
+}
+
+.ai-structure-section > .ai-structure-branches.is-editable {
+  margin: 0;
+  padding: 0;
+  border-top: 0;
+}
+
+.ai-structure-branches.is-editable li.ai-structure-branch {
+  display: grid;
+  grid-template-columns: 1.1fr 0.6fr 1fr 1.2fr;
+  align-items: end;
+  gap: var(--space-2xs);
+}
+
+.ai-structure-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ai-structure-field-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+}
+
+.ai-structure-input {
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-3xs) var(--space-2xs);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xs);
+  background: #FFFFFF;
+  font-family: inherit;
+  font-size: var(--text-xs);
+  color: var(--text-primary);
+}
+
+.ai-structure-input:focus-visible {
+  outline: 2px solid rgba(74, 144, 164, 0.6);
+  outline-offset: 1px;
+}
+
+.ai-structure-input:is(select) {
+  padding-right: var(--space-lg);
+  cursor: pointer;
+}
+
+textarea.ai-structure-input {
+  resize: vertical;
+  line-height: 1.4;
+}
+
+/* Editable card: numbered sections carry their own editors (Basics, Registration,
+   Sessions), reusing the spine's numbered-badge look for each heading. */
+.ai-structure-sections {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  counter-reset: ai-structure-step;
+}
+
+.ai-structure-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-sm);
+  border: 1px solid rgba(51, 78, 92, 0.12);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.48);
+  counter-increment: ai-structure-step;
+}
+
+.ai-structure-section-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  padding-bottom: var(--space-2xs);
+  border-bottom: 1px solid rgba(51, 78, 92, 0.1);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ai-structure-section-title::before {
+  content: counter(ai-structure-step);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border-radius: var(--radius-xs);
+  background: #E6EBF0;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ai-structure-field-wide {
+  width: 100%;
+}
+
+.ai-structure-registration {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-sm);
+}
+
+.ai-structure-registration .ai-structure-field {
+  min-width: 160px;
+}
+
+.ai-structure-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3xs);
+  padding-bottom: var(--space-3xs);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+/* In-chat requirements form (Agent Center pattern): grouped, prefilled fields
+   inside an AI response bubble. Inputs inherit .event-field styling. */
+.ai-requirements-form {
+  margin-top: var(--space-sm);
+  padding: var(--space-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-glass);
+  backdrop-filter: var(--glass-panel-blur);
+}
+
+.ai-requirements-title {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ai-requirements-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+}
+
+.ai-requirements-group-label {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.ai-requirements-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2xs) var(--space-sm);
+}
+
+.ai-requirements-wide {
+  grid-column: 1 / -1;
+}
+
+.ai-requirements-form .event-field textarea {
+  min-height: 56px;
+}
+
+.ai-requirements-refs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+}
+
+.ai-requirements-ref-hint {
+  font-size: var(--text-xs);
+  color: #99a6ad;
+}
+
+.ai-requirements-ref-add {
+  font-family: var(--font-family-base);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: none;
+  border: 1px dashed rgba(51, 78, 92, 0.3);
+  border-radius: var(--radius-xs);
+  padding: 2px var(--space-2xs);
+  cursor: default;
+}
+
+.ai-requirements-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2xs);
+  justify-content: flex-end;
+}
+
+.ai-requirements-form input:disabled,
+.ai-requirements-form textarea:disabled,
+.ai-requirements-form select:disabled,
+.ai-requirements-form button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* "Successfully generated / Review in Canvas" card. */
+.ai-generated-card {
+  margin-top: var(--space-sm);
+  padding: var(--space-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-glass);
+  backdrop-filter: var(--glass-panel-blur);
+}
+
+.ai-generated-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+}
+
+.ai-generated-name {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ai-generated-chip {
+  flex: none;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 1px 8px;
+  border-radius: 9999px;
+  background: #C7D2DC;
+  color: var(--text-primary);
+}
+
+.ai-generated-label {
   font-size: var(--text-xs);
   color: var(--text-secondary);
 }
@@ -1372,6 +1755,30 @@ body.resizing-panel {
 
 .page-switcher-popover[aria-hidden="true"] {
   display: none;
+}
+
+/* Enter: Polar composite polar-motion-dialog-expressive (Dialog.Navigation).
+   Origin near the trigger corner so it unfolds from the toggle. */
+.page-switcher-popover[aria-hidden="false"] {
+  transform-origin: top left;
+  animation: polar-motion-dialog-expressive var(--polar-motion-duration-medium) var(--polar-motion-easing-enter);
+}
+
+@keyframes polar-motion-dialog-expressive {
+  from {
+    opacity: 0;
+    transform: scale(var(--polar-motion-dialog-expressive-scale));
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-switcher-popover[aria-hidden="false"] {
+    animation: none;
+  }
 }
 
 /* Left navigation column. */
@@ -1587,6 +1994,82 @@ a.switcher-nav-link {
   line-height: var(--line-height-tight);
 }
 
+/* Swappable preview panels: one per selected destination in the rail. */
+.switcher-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+  flex: 1;
+  min-height: 0;
+}
+
+.switcher-panel.is-hidden {
+  display: none;
+}
+
+/* Entry points inside the Events preview (New event / Create with AI). */
+.switcher-entry {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  width: 100%;
+  padding: var(--space-2xs);
+  border: 1px solid rgba(51, 78, 92, 0.12);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.7);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--polar-motion-duration-fast) var(--polar-motion-easing-standard), background var(--polar-motion-duration-fast) var(--polar-motion-easing-standard);
+}
+
+.switcher-entry:hover {
+  border-color: var(--accent-blue);
+  background: #fff;
+}
+
+.switcher-entry-icon {
+  width: var(--switcher-thumb-height);
+  height: var(--switcher-thumb-height);
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9.422px;
+  background: #fff;
+}
+
+.switcher-entry-icon img {
+  width: var(--switcher-thumb-icon-size);
+  height: var(--switcher-thumb-icon-size);
+}
+
+.switcher-entry-icon-primary {
+  background: #1932d5;
+}
+
+.switcher-entry-icon-primary img {
+  filter: brightness(0) invert(1);
+}
+
+.switcher-entry-copy {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4xs);
+  color: var(--text-secondary);
+}
+
+.switcher-entry-copy strong {
+  font-size: var(--text-sm);
+  line-height: var(--line-height-tight);
+}
+
+.switcher-entry-copy span {
+  font-size: var(--text-xs);
+  line-height: var(--line-height-tight);
+  color: #99a6ad;
+}
+
 /* ======================================
    Omnibox Overlay
    ====================================== */
@@ -1605,6 +2088,44 @@ a.switcher-nav-link {
 
 .omnibox-overlay[aria-hidden="true"] {
   display: none;
+}
+
+/* Enter: Polar composite polar-motion-dialog-standard (Dialog) for the panel,
+   with the backdrop fading in sync (same duration + easing). */
+.omnibox-overlay[aria-hidden="false"] .omnibox-panel {
+  transform-origin: top center;
+  animation: polar-motion-dialog-standard var(--polar-motion-duration-medium) var(--polar-motion-easing-enter);
+}
+
+.omnibox-overlay[aria-hidden="false"] .omnibox-backdrop {
+  animation: polar-motion-overlay-backdrop var(--polar-motion-duration-medium) var(--polar-motion-easing-enter);
+}
+
+@keyframes polar-motion-dialog-standard {
+  from {
+    opacity: 0;
+    transform: scale(var(--polar-motion-dialog-standard-scale));
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes polar-motion-overlay-backdrop {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .omnibox-overlay[aria-hidden="false"] .omnibox-panel,
+  .omnibox-overlay[aria-hidden="false"] .omnibox-backdrop {
+    animation: none;
+  }
 }
 
 /* Soft page wash behind the omnibox panel. */
@@ -1891,14 +2412,33 @@ a.switcher-nav-link {
   background: #fff;
   border-radius: var(--radius-sm);
   overflow: hidden;
-  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: transform var(--polar-motion-duration-medium) var(--polar-motion-easing-standard),
+    box-shadow var(--polar-motion-duration-medium) var(--polar-motion-easing-standard);
 }
 
 .content-card:hover,
 .content-card:focus-within {
   transform: scale(1.01);
   box-shadow: 0 14px 30px rgba(51, 78, 92, 0.12), var(--glass-shadow);
+}
+
+/* Respect reduced motion: keep the card hover-lift state (shadow, z-index)
+   but drop the scale/transform motion the tokenized transitions animate. */
+@media (prefers-reduced-motion: reduce) {
+  .home-insight-card,
+  .content-card {
+    transition: none;
+  }
+
+  .home-insight-card:hover,
+  .home-insight-card:focus-within {
+    transform: translateY(var(--card-offset-y));
+  }
+
+  .content-card:hover,
+  .content-card:focus-within {
+    transform: none;
+  }
 }
 
 .content-card-thumb {
@@ -2137,6 +2677,57 @@ a.switcher-nav-link {
   line-height: var(--line-height-relaxed);
 }
 
+/* Publish confirmation: what the agent pushed to the connected systems. */
+.event-sync-summary {
+  margin-top: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid rgba(42, 186, 248, 0.28);
+  border-radius: var(--radius-sm);
+  background: rgba(245, 251, 255, 0.7);
+}
+
+.event-sync-summary h3 {
+  margin: 0 0 var(--space-2xs);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+
+.event-sync-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--space-3xs);
+}
+
+.event-sync-item {
+  position: relative;
+  padding-left: var(--space-md);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--line-height-relaxed);
+}
+
+.event-sync-item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.55em;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(42, 186, 248, 0.6);
+}
+
+.event-sync-item.is-calendar::before { background: rgba(120, 132, 242, 0.7); }
+.event-sync-item.is-room::before { background: rgba(76, 178, 130, 0.75); }
+.event-sync-item.is-video::before { background: rgba(240, 150, 80, 0.75); }
+
+.event-sync-provider {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
 .workspace-event-editor {
   flex: 1;
   min-height: 0;
@@ -2275,8 +2866,8 @@ a.switcher-nav-link {
   box-shadow: var(--toast-shadow);
   pointer-events: auto;
   opacity: 1;
-  transition: opacity 280ms ease;
-  animation: event-admin-toast-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: opacity var(--polar-motion-duration-medium) var(--polar-motion-easing-enter);
+  animation: event-admin-toast-in var(--polar-motion-duration-medium) var(--polar-motion-easing-enter);
 }
 
 @keyframes event-admin-toast-in {
@@ -2322,7 +2913,7 @@ a.switcher-nav-link {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background-color 0.15s ease, border-color 0.15s ease;
+  transition: background-color var(--polar-motion-duration-fast) var(--polar-motion-easing-standard), border-color var(--polar-motion-duration-fast) var(--polar-motion-easing-standard);
 }
 
 .event-admin-toast-dismiss:hover,
@@ -2338,6 +2929,29 @@ a.switcher-nav-link {
 
 .event-admin-main-panel {
   background: rgba(255, 255, 255, 0.42);
+}
+
+/* One-shot flash when a node is picked on the map, so the click's payoff in this
+   far-right column is impossible to miss. */
+.event-admin-main-panel.is-attn {
+  animation: event-panel-attn 0.9s var(--polar-motion-easing-standard);
+}
+
+@keyframes event-panel-attn {
+  0% {
+    background: rgba(42, 186, 248, 0.16);
+    box-shadow: inset 3px 0 0 0 rgba(42, 186, 248, 0.85);
+  }
+  100% {
+    background: rgba(255, 255, 255, 0.42);
+    box-shadow: inset 3px 0 0 0 rgba(42, 186, 248, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .event-admin-main-panel.is-attn {
+    animation: none;
+  }
 }
 
 .event-admin-nav-title-row,
@@ -2383,7 +2997,7 @@ a.switcher-nav-link {
   gap: var(--space-2xs);
   text-align: left;
   width: 100%;
-  transition: border-color 0.2s ease, background 0.2s ease;
+  transition: border-color var(--polar-motion-duration-fast) var(--polar-motion-easing-standard), background var(--polar-motion-duration-fast) var(--polar-motion-easing-standard);
 }
 
 .event-palette-item:hover:not(:disabled) {
@@ -2431,6 +3045,12 @@ a.switcher-nav-link {
   display: none;
 }
 
+/* The alert sits outside the builder grid so it survives the cold start, which
+   also means it has to supply the inset the canvas column used to give it. */
+.event-admin-panel > .event-admin-alert {
+  margin: var(--space-sm) var(--space-sm) 0;
+}
+
 .event-admin-canvas {
   flex: 1;
   min-height: min(360px, 45vh);
@@ -2456,29 +3076,240 @@ a.switcher-nav-link {
   text-align: right;
 }
 
-.event-template-gallery.is-hidden {
+/* Cold start owns the panel until an event exists, so the builder grid stands
+   down rather than framing a form that is asking the same question. */
+.event-admin-panel.is-cold-start .event-admin-layout,
+.event-admin-panel.is-proposal .event-admin-layout {
   display: none;
 }
 
-.event-template-gallery {
+.event-cold-start.is-hidden {
+  display: none;
+}
+
+/* Proposal review: the pre-map human checkpoint. Shares the cold start's
+   panel-filling, scrollable card treatment. */
+.event-proposal.is-hidden {
+  display: none;
+}
+
+.event-proposal {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  overflow: auto;
+  padding: var(--space-lg);
+}
+
+.event-proposal-card {
+  width: 100%;
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.event-proposal-header h3 {
+  margin: 0 0 4px;
+}
+
+.event-proposal-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.event-proposal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-sm) var(--space-md);
+}
+
+.event-proposal-wide {
+  grid-column: 1 / -1;
+}
+
+.event-proposal-check {
+  align-self: end;
+}
+
+.event-proposal-check label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.event-proposal-gap-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.event-proposal-gap {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: var(--text-sm);
+}
+
+.event-proposal-gap-kind {
+  flex: none;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 9999px;
+}
+
+.event-proposal-gap.is-gap .event-proposal-gap-kind {
+  background: rgba(240, 150, 40, 0.16);
+  color: #9a5a00;
+}
+
+.event-proposal-gap.is-assumption .event-proposal-gap-kind {
+  background: rgba(42, 186, 248, 0.14);
+  color: #12779e;
+}
+
+.event-cold-start {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  align-content: center;
+  /* Keeps the card reachable when it is taller than the panel: plain centring
+     would push its top past the scroll origin. */
+  align-content: safe center;
+  justify-items: center;
+  padding: var(--space-lg) var(--space-md);
+}
+
+.event-cold-start-card {
+  width: min(680px, 100%);
   display: grid;
   gap: var(--space-sm);
-  padding: var(--space-sm);
+  padding: var(--space-md);
   border: 1px solid rgba(51, 78, 92, 0.12);
   border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.48);
-  max-height: min(200px, 28vh);
-  overflow-y: auto;
 }
 
-.event-template-gallery-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+.event-cold-start-header {
+  display: grid;
+  gap: var(--space-4xs);
+}
+
+.event-quick-lede {
+  color: #99a6ad;
+  font-size: var(--text-xs);
+  line-height: var(--line-height-normal);
+}
+
+.event-quick-form {
+  display: grid;
   gap: var(--space-sm);
 }
 
-.event-template-gallery-header h3 {
+.event-quick-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-sm);
+}
+
+.event-quick-wide {
+  grid-column: span 2;
+}
+
+.event-quick-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.event-quick-secondary {
+  color: #99a6ad;
+  font-size: var(--text-sm);
+}
+
+.event-quick-dot {
+  padding-inline: var(--space-4xs);
+}
+
+/* Scope groups: the seam that says which answers describe the event and which
+   describe its sessions, since the form writes to both levels. */
+.event-quick-group,
+.event-quick-shape {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-inline-size: 0;
+}
+
+.event-quick-group > legend,
+.event-quick-shape > legend {
+  padding: 0 0 var(--space-3xs);
+  color: #7d8b93;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.event-quick-shape {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  flex-wrap: wrap;
+}
+
+.event-quick-shape > legend {
+  float: left;
+  width: 100%;
+}
+
+.event-quick-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3xs);
+  padding: var(--space-3xs) var(--space-2xs);
+  border: 1px solid rgba(51, 78, 92, 0.16);
+  border-radius: var(--radius-xs);
+  background: rgba(255, 255, 255, 0.62);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: border-color var(--polar-motion-duration-fast) var(--polar-motion-easing-standard), box-shadow var(--polar-motion-duration-fast) var(--polar-motion-easing-standard);
+}
+
+.event-quick-chip:hover {
+  border-color: rgba(42, 186, 248, 0.55);
+}
+
+.event-quick-chip:has(input:checked) {
+  border-color: rgba(42, 186, 248, 0.7);
+  box-shadow: inset 0 0 0 1px rgba(42, 186, 248, 0.2);
+}
+
+#event-quick-session-count {
+  width: 4rem;
+}
+
+#event-quick-session-count.is-hidden {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .event-quick-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.event-cold-start-header h3 {
   color: var(--text-primary);
   font-size: var(--text-sm);
   font-weight: 600;
@@ -2492,41 +3323,6 @@ a.switcher-nav-link {
   font-size: var(--text-sm);
   cursor: pointer;
   padding: 0;
-}
-
-.event-template-cards {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-sm);
-}
-
-.event-template-card {
-  display: grid;
-  gap: var(--space-4xs);
-  padding: var(--space-sm);
-  border: 1px solid rgba(51, 78, 92, 0.16);
-  border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.62);
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
-}
-
-.event-template-card:hover {
-  border-color: rgba(42, 186, 248, 0.55);
-  box-shadow: inset 0 0 0 1px rgba(42, 186, 248, 0.15);
-}
-
-.event-template-card-title {
-  color: var(--text-primary);
-  font-size: var(--text-sm);
-  font-weight: 600;
-}
-
-.event-template-card-description {
-  color: #99a6ad;
-  font-size: var(--text-xs);
-  line-height: var(--line-height-normal);
 }
 
 .event-canvas-viewport {
@@ -2580,8 +3376,8 @@ a.switcher-nav-link {
 
 .event-canvas-edge-path {
   fill: none;
-  stroke: rgba(51, 78, 92, 0.34);
-  stroke-width: 1.5;
+  stroke: rgba(51, 78, 92, 0.28);
+  stroke-width: 1.25;
   stroke-linecap: round;
 }
 
@@ -2592,24 +3388,6 @@ a.switcher-nav-link {
 .event-canvas-edge-path.is-stub {
   stroke: rgba(42, 186, 248, 0.4);
   stroke-dasharray: 3 4;
-}
-
-.event-canvas-branch-label {
-  position: absolute;
-  z-index: 2;
-  transform: translate(-50%, -50%);
-  max-width: 168px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  border: 1px solid rgba(42, 186, 248, 0.35);
-  border-radius: 999px;
-  background: rgba(245, 251, 255, 0.95);
-  color: #12779e;
-  font-size: 11px;
-  line-height: var(--line-height-tight);
-  padding: 2px 10px;
-  pointer-events: none;
 }
 
 /* Terminals */
@@ -2638,19 +3416,19 @@ a.switcher-nav-link {
   display: flex;
   align-items: center;
   gap: var(--space-2xs);
-  border: 1px solid rgba(51, 78, 92, 0.15);
+  border: 1px solid rgba(51, 78, 92, 0.18);
   border-radius: var(--radius-sm);
-  background: rgba(251, 252, 253, 0.82);
+  background: #fff;
   padding: 0 var(--space-sm);
   box-sizing: border-box;
   cursor: pointer;
   user-select: none;
-  transition: border-color 0.2s ease, background 0.2s ease;
+  transition: border-color var(--polar-motion-duration-fast) var(--polar-motion-easing-standard), background var(--polar-motion-duration-fast) var(--polar-motion-easing-standard), box-shadow var(--polar-motion-duration-fast) var(--polar-motion-easing-standard), transform var(--polar-motion-duration-fast) var(--polar-motion-easing-standard);
 }
 
 .event-canvas-node:hover {
   border-color: rgba(42, 186, 248, 0.45);
-  background: rgba(251, 252, 253, 0.95);
+  background: #fff;
 }
 
 .event-canvas-node-session {
@@ -2658,30 +3436,152 @@ a.switcher-nav-link {
   background: rgba(245, 251, 255, 0.92);
 }
 
+/* Integration pills the agent synced. They sit just below the node in the gap
+   before its children, so the node keeps its fixed height while "what synced"
+   stays legible on the canvas artifact. */
+.event-canvas-node-session,
+.event-canvas-node {
+  overflow: visible;
+}
+
+.event-sync-field .event-sync-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3xs);
+  margin-top: var(--space-3xs);
+}
+
+.event-glance-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3xs);
+  margin-top: var(--space-3xs);
+}
+
+.event-glance-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-sm);
+}
+
+.event-glance-label {
+  font-size: var(--text-xs);
+  color: rgba(51, 78, 92, 0.7);
+}
+
+.event-glance-value {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: rgba(28, 44, 54, 0.95);
+  text-align: right;
+}
+
+.event-glance-value.is-empty {
+  font-weight: 500;
+  color: rgba(51, 78, 92, 0.5);
+}
+
+.event-integration-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-xs);
+  padding: 1px var(--space-2xs);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.event-integration-badge.is-audience {
+  background: rgba(42, 186, 248, 0.14);
+  color: rgba(28, 118, 156, 0.95);
+  border-color: rgba(42, 186, 248, 0.28);
+}
+
+.event-integration-badge.is-enroll {
+  background: rgba(42, 186, 248, 0.12);
+  color: rgba(28, 118, 156, 0.95);
+}
+
+.event-integration-badge.is-calendar {
+  background: rgba(120, 132, 242, 0.14);
+  color: rgba(78, 88, 196, 0.95);
+}
+
+.event-integration-badge.is-room {
+  background: rgba(76, 178, 130, 0.16);
+  color: rgba(38, 120, 84, 0.95);
+}
+
+.event-integration-badge.is-video {
+  background: rgba(240, 150, 80, 0.16);
+  color: rgba(178, 96, 32, 0.95);
+}
+
+.event-canvas-node-ghost {
+  border-style: dashed;
+  border-color: rgba(51, 78, 92, 0.28);
+  background: rgba(255, 255, 255, 0.42);
+  text-align: left;
+  font-family: var(--font-family-base);
+}
+
+.event-canvas-node-ghost:hover {
+  border-style: solid;
+  border-color: rgba(42, 186, 248, 0.55);
+  background: #fff;
+}
+
+.event-canvas-node-ghost .event-canvas-node-tile,
+.event-canvas-node-ghost .event-canvas-node-title,
+.event-canvas-node-ghost .event-canvas-node-summary {
+  opacity: 0.72;
+}
+
+/* A ghost's helper is the only explanation on an otherwise empty canvas, so let
+   it wrap rather than truncate the way a populated card's data summary does. */
+.event-canvas-node-ghost .event-canvas-node-summary {
+  white-space: normal;
+  overflow: visible;
+}
+
+.event-canvas-node-ghost-cta {
+  flex-shrink: 0;
+  border-radius: var(--radius-xs);
+  padding: 0 var(--space-2xs);
+  background: rgba(42, 186, 248, 0.12);
+  color: rgba(28, 118, 156, 0.95);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
 .event-canvas-node-child {
-  background: rgba(255, 255, 255, 0.88);
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(51, 78, 92, 0.11);
+  padding: 0 var(--space-2xs);
+  gap: var(--space-3xs);
+}
+
+.event-canvas-node-child .event-canvas-node-tile {
+  width: 20px;
+  height: 20px;
+}
+
+.event-canvas-node-child .event-canvas-node-tile svg {
+  width: 12px;
+  height: 12px;
+}
+
+.event-canvas-node-child .event-canvas-node-title {
+  font-size: 13px;
+  font-weight: 500;
 }
 
 .event-canvas-node-has-error {
   border-color: rgba(227, 137, 26, 0.55);
   box-shadow: inset 0 0 0 1px rgba(227, 137, 26, 0.18);
-}
-
-.event-canvas-node-error-badge {
-  position: absolute;
-  top: -6px;
-  left: -6px;
-  width: 16px;
-  height: 16px;
-  border-radius: 999px;
-  background: rgba(227, 137, 26, 0.92);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 16px;
-  text-align: center;
-  z-index: 4;
-  pointer-events: none;
 }
 
 .event-canvas-node:focus-visible {
@@ -2690,13 +3590,17 @@ a.switcher-nav-link {
 }
 
 .event-canvas-node.is-active {
-  border-color: rgba(42, 186, 248, 0.7);
-  box-shadow: inset 0 0 0 1px rgba(42, 186, 248, 0.25);
+  border-color: rgba(42, 186, 248, 0.9);
+  background: #fff;
+  box-shadow: 0 0 0 2px rgba(42, 186, 248, 0.35), 0 6px 16px rgba(42, 186, 248, 0.18);
+  transform: translateY(-1px);
 }
 
-/* Marks a node the assistant just edited. Brief and quiet per design.md. */
+/* Marks a node the assistant just edited. Brief and quiet per design.md.
+   Duration is intentionally outside the Polar Motion token scale: this is a
+   one-shot attention pulse, not a UI state/enter/exit transition. */
 .event-canvas-node.is-ai-changed {
-  animation: event-node-ai-pulse 1.1s cubic-bezier(0.22, 1, 0.36, 1);
+  animation: event-node-ai-pulse 1.1s var(--polar-motion-easing-standard);
 }
 
 @keyframes event-node-ai-pulse {
@@ -2717,6 +3621,55 @@ a.switcher-nav-link {
   }
 }
 
+/* Build reveal: freshly generated nodes stagger onto the map on the first paint,
+   dramatizing "the AI built this". Enter easing + medium duration per the Polar
+   Motion tokens; the per-node delay is set inline. `both` holds the start state
+   through the delay so the stagger reads. */
+.event-canvas-node.is-revealing {
+  animation: event-canvas-node-in var(--polar-motion-duration-medium) var(--polar-motion-easing-enter) both;
+  animation-delay: var(--reveal-delay, 0ms);
+}
+
+@keyframes event-canvas-node-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .event-canvas-node.is-revealing {
+    animation: none;
+  }
+}
+
+/* Publish confirmation: a small accent check that scales in beside the heading,
+   marking the finish. Token-aligned enter motion; reduced-motion drops it. */
+.event-publish-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-right: 6px;
+  border-radius: 9999px;
+  background: #2ABAF8;
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  vertical-align: middle;
+  animation: event-publish-check-in var(--polar-motion-duration-medium) var(--polar-motion-easing-enter) both;
+}
+
+@keyframes event-publish-check-in {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .event-publish-check {
+    animation: none;
+  }
+}
+
 .event-canvas-node-tile,
 .event-palette-tile {
   display: inline-flex;
@@ -2726,10 +3679,12 @@ a.switcher-nav-link {
   height: 26px;
   flex: none;
   border-radius: var(--radius-xs);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
+}
+
+.event-canvas-node-tile svg,
+.event-palette-tile svg {
+  width: 15px;
+  height: 15px;
 }
 
 .event-canvas-tone-accent {
@@ -2776,7 +3731,7 @@ a.switcher-nav-link {
   white-space: nowrap;
 }
 
-.event-canvas-node-kind {
+.event-canvas-node-summary {
   color: #99a6ad;
   font-size: 11px;
   line-height: var(--line-height-tight);
@@ -2784,6 +3739,26 @@ a.switcher-nav-link {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  flex: 1;
+}
+
+.event-canvas-node-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+}
+
+.event-canvas-node-dot.complete {
+  background: #3ca65d;
+}
+
+.event-canvas-node-dot.in-progress {
+  background: var(--accent-blue);
+}
+
+.event-canvas-node-dot.needs-attention {
+  background: #e3891a;
 }
 
 .event-canvas-node-remove {
@@ -2805,7 +3780,7 @@ a.switcher-nav-link {
   opacity: 0;
   pointer-events: none;
   transform: scale(0.92);
-  transition: opacity 120ms ease, transform 120ms ease;
+  transition: opacity var(--polar-motion-duration-fast) var(--polar-motion-easing-standard), transform var(--polar-motion-duration-fast) var(--polar-motion-easing-standard);
   z-index: 5;
 }
 
@@ -2818,34 +3793,39 @@ a.switcher-nav-link {
 
 /* Insertion affordance */
 
+/* Dividing the canvas zoom back out keeps these controls a constant size on
+   screen, so they stay clickable at the 70% build reveal. */
 .event-canvas-insert {
   position: absolute;
-  transform: translate(-50%, -50%);
+  transform: translate(-50%, -50%) scale(calc(1 / var(--canvas-zoom, 1)));
 }
 
 .event-canvas-insert-button {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
-  border: 1px solid rgba(51, 78, 92, 0.22);
+  width: 24px;
+  height: 24px;
+  border: 1px solid rgba(42, 186, 248, 0.45);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.95);
-  color: var(--text-secondary);
-  font-size: 13px;
+  /* Opaque fill plus a white ring breaks the connector at the insertion point. */
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.9);
+  color: #12779e;
+  font-size: 15px;
+  font-weight: 500;
   line-height: 1;
   cursor: pointer;
-  opacity: 0.55;
-  transition: opacity 120ms ease, border-color 120ms ease, color 120ms ease;
+  transition: background var(--polar-motion-duration-fast) var(--polar-motion-easing-standard), border-color var(--polar-motion-duration-fast) var(--polar-motion-easing-standard), transform var(--polar-motion-duration-fast) var(--polar-motion-easing-standard);
 }
 
 .event-canvas-insert-button:hover,
 .event-canvas-insert-button:focus-visible,
 .event-canvas-insert.is-open .event-canvas-insert-button {
-  opacity: 1;
-  border-color: rgba(42, 186, 248, 0.7);
-  color: #12779e;
+  border-color: rgba(42, 186, 248, 0.85);
+  background: rgba(42, 186, 248, 0.12);
+  transform: scale(1.08);
+  outline: none;
 }
 
 /* Cleared past the half-width of a spine node so the menu never covers a card. */
@@ -3055,6 +4035,55 @@ a.switcher-nav-link {
   padding: var(--space-2xs);
 }
 
+/* Provenance marker: says whether a value came from the event or was set here. */
+.event-inherit-chip {
+  flex: none;
+  border-radius: var(--radius-xs);
+  border: 1px solid rgba(51, 78, 92, 0.16);
+  background: rgba(51, 78, 92, 0.04);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: var(--line-height-tight);
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+
+.event-inherit-chip.is-override {
+  border-color: rgba(42, 186, 248, 0.4);
+  background: rgba(42, 186, 248, 0.08);
+  color: #12779e;
+}
+
+.event-roster-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3xs);
+}
+
+.event-roster-chip {
+  border: 1px dashed rgba(42, 186, 248, 0.5);
+  border-radius: 999px;
+  background: transparent;
+  color: #12779e;
+  font-family: var(--font-family-base);
+  font-size: var(--text-xs);
+  line-height: var(--line-height-tight);
+  padding: var(--space-4xs) var(--space-2xs);
+  cursor: pointer;
+  transition: background var(--polar-motion-duration-fast) var(--polar-motion-easing-standard), border-color var(--polar-motion-duration-fast) var(--polar-motion-easing-standard);
+}
+
+.event-roster-chip:hover,
+.event-roster-chip:focus-visible {
+  border-style: solid;
+  background: rgba(42, 186, 248, 0.1);
+}
+
+.event-instructor-email {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
 .event-instructor-value {
   flex: 1;
   color: var(--text-secondary);
@@ -3220,5 +4249,311 @@ a.switcher-nav-link {
 
 .event-publish-success-chip.is-hidden {
   display: none;
+}
+
+/* ===========================================================================
+   Event outline (primary editing surface), Map toggle, and AI cold start.
+   Reuses the existing glass, blue-gray, and status tokens so the new surface
+   reads as part of the same kit rather than a bolt-on.
+   =========================================================================== */
+
+/* The canvas container doubles as the outline scroller. Map view keeps the
+   dashed graph paper and clipped overflow; outline view scrolls natively. */
+.event-admin-canvas:not(.is-map-view) {
+  overflow-y: auto;
+  cursor: default;
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.event-canvas-zoom-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3xs);
+}
+
+.event-canvas-zoom-cluster.is-hidden {
+  display: none;
+}
+
+.event-outline {
+  display: grid;
+  gap: var(--space-4xs);
+  align-content: start;
+}
+
+.event-outline-item {
+  display: grid;
+  gap: var(--space-4xs);
+}
+
+.event-outline-children {
+  display: grid;
+  gap: var(--space-4xs);
+  margin-left: var(--space-md);
+  padding-left: var(--space-sm);
+  border-left: 1px solid rgba(51, 78, 92, 0.14);
+}
+
+.event-outline-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  width: 100%;
+  padding: var(--space-2xs) var(--space-sm);
+  border: 1px solid rgba(51, 78, 92, 0.1);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.55);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--polar-motion-duration-fast) var(--polar-motion-easing-standard), background var(--polar-motion-duration-fast) var(--polar-motion-easing-standard);
+  /* Delight: a quick, subtle staged reveal as rows paint in.
+     Polar "List items entering": medium + enter. */
+  animation: event-outline-row-in var(--polar-motion-duration-medium) var(--polar-motion-easing-enter) both;
+}
+
+.event-outline-row:hover {
+  border-color: rgba(42, 186, 248, 0.5);
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.event-outline-row.is-active {
+  border-color: var(--accent-blue);
+  box-shadow: inset 0 0 0 1px rgba(42, 186, 248, 0.5);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.event-outline-row:focus-visible {
+  outline: 2px solid rgba(42, 186, 248, 0.6);
+  outline-offset: 1px;
+}
+
+.event-outline-row.is-ai-changed {
+  border-color: rgba(42, 186, 248, 0.5);
+}
+
+.event-outline-session > .event-outline-row {
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.event-outline-caret {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.event-outline-caret:hover {
+  background: rgba(51, 78, 92, 0.08);
+}
+
+.event-outline-caret-spacer {
+  flex: none;
+  width: 20px;
+  height: 20px;
+}
+
+.event-outline-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border-radius: var(--radius-xs);
+}
+
+.event-outline-tile svg {
+  width: 14px;
+  height: 14px;
+}
+
+.event-outline-copy {
+  display: grid;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.event-outline-title {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: var(--line-height-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-outline-summary {
+  color: #99a6ad;
+  font-size: 11px;
+  line-height: var(--line-height-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-outline-status {
+  flex: none;
+}
+
+.event-outline-actions {
+  display: inline-flex;
+  gap: var(--space-4xs);
+  flex: none;
+  opacity: 0;
+  transition: opacity var(--polar-motion-duration-fast) var(--polar-motion-easing-standard);
+}
+
+.event-outline-row:hover .event-outline-actions,
+.event-outline-row.is-active .event-outline-actions,
+.event-outline-row:focus-within .event-outline-actions {
+  opacity: 1;
+}
+
+.event-outline-add {
+  justify-self: start;
+  border: 1px dashed rgba(51, 78, 92, 0.28);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  padding: var(--space-3xs) var(--space-sm);
+  cursor: pointer;
+  transition: border-color var(--polar-motion-duration-fast) var(--polar-motion-easing-standard), color var(--polar-motion-duration-fast) var(--polar-motion-easing-standard);
+}
+
+.event-outline-add:hover {
+  border-color: var(--accent-blue);
+  color: #12779e;
+}
+
+.event-outline-ghost {
+  border-style: dashed;
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.event-outline-add-cta {
+  flex: none;
+  font-size: var(--text-xs);
+  color: #12779e;
+}
+
+@keyframes event-outline-row-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* AI cold start: leads the create flow, with the manual quick form as a
+   collapsible fallback beneath it. */
+.event-ai-coldstart {
+  gap: var(--space-md);
+}
+
+.event-ai-form {
+  display: grid;
+  gap: var(--space-sm);
+}
+
+.event-ai-input-wrap {
+  position: relative;
+}
+
+.event-ai-input {
+  width: 100%;
+  resize: vertical;
+  min-height: 84px;
+  border: 1px solid rgba(51, 78, 92, 0.16);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.7);
+  padding: var(--space-sm);
+  font: inherit;
+  color: var(--text-secondary);
+  line-height: var(--line-height-normal);
+}
+
+.event-ai-input:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 3px rgba(42, 186, 248, 0.16);
+}
+
+.event-ai-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2xs);
+}
+
+.event-ai-chip {
+  border: 1px solid rgba(51, 78, 92, 0.16);
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  padding: var(--space-5xs) var(--space-sm);
+  cursor: pointer;
+  transition: border-color var(--polar-motion-duration-fast) var(--polar-motion-easing-standard), color var(--polar-motion-duration-fast) var(--polar-motion-easing-standard);
+}
+
+.event-ai-chip:hover {
+  border-color: var(--accent-blue);
+  color: #12779e;
+}
+
+.event-ai-generating {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2xs);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(2px);
+  color: #12779e;
+  font-size: var(--text-sm);
+}
+
+.event-ai-generating.is-hidden {
+  display: none;
+}
+
+.event-ai-spark {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+  border: 2px solid rgba(42, 186, 248, 0.35);
+  border-top-color: var(--accent-blue);
+  /* Continuous loading spinner: intentionally outside the Polar Motion token
+     scale (linear, infinite), which covers state/enter/exit transitions only. */
+  animation: event-ai-spin 0.7s linear infinite;
+}
+
+@keyframes event-ai-spin {
+  to { transform: rotate(360deg); }
+}
+
+.event-quick-manual {
+  display: grid;
+  gap: var(--space-sm);
+  padding-top: var(--space-sm);
+  border-top: 1px solid rgba(51, 78, 92, 0.12);
+}
+
+.event-quick-manual.is-hidden {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .event-outline-row { animation: none; }
+  .event-ai-spark { animation-duration: 1.4s; }
 }
 
