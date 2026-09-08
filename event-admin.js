@@ -246,8 +246,14 @@
     proposalParams: null,
     // Fired after a proposal is built so the chat layer can run its enterprise
     // sync pass on the freshly mapped event.
-    onEventBuilt: null
+    onEventBuilt: null,
+    onEventPublished: null,
+    // Linear undo stack of serialized draft snapshots, taken before each
+    // applyEventEdit mutation so the chat layer can offer a one-click revert.
+    editHistory: []
   };
+
+  const EDIT_HISTORY_LIMIT = 20;
 
   let toastTimeoutId = null;
   let toastDismissTimeoutId = null;
@@ -767,6 +773,32 @@
 
   function finishPanDrag() {
     state.panDrag = null;
+  }
+
+  // Serializes the current draft the same way saveDraft does (dropping derived
+  // coords) so a later undo can restore it byte-for-byte.
+  function snapshotForUndo() {
+    if (!state.draft) return;
+    state.editHistory.push(JSON.stringify(state.draft, omitDerivedCoords));
+    if (state.editHistory.length > EDIT_HISTORY_LIMIT) state.editHistory.shift();
+  }
+
+  function undoLastEdit() {
+    if (!state.editHistory.length) return { ok: false, message: 'There is nothing to undo.' };
+    const snapshot = state.editHistory.pop();
+    let restored;
+    try {
+      restored = JSON.parse(snapshot);
+    } catch (error) {
+      return { ok: false, message: 'I could not undo the last change.' };
+    }
+    // loadDraft resets the edit history's sibling state; preserve the remaining
+    // stack so successive undos keep walking back.
+    const remaining = state.editHistory.slice();
+    loadDraft(restored);
+    state.editHistory = remaining;
+    markDirty();
+    return { ok: true, message: 'Reverted the last change.' };
   }
 
   function markDirty() {
@@ -1403,15 +1435,16 @@
     return nodeId;
   }
 
-  function removeSessionBranch(sessionId) {
-    const childIds = getSessionChildNodes(state.draft, sessionId).map(function (node) { return node.id; });
-    state.draft.nodes = state.draft.nodes.filter(function (item) {
+  function removeSessionBranch(sessionId, targetDraft) {
+    const draft = targetDraft || state.draft;
+    const childIds = getSessionChildNodes(draft, sessionId).map(function (node) { return node.id; });
+    draft.nodes = draft.nodes.filter(function (item) {
       return item.id !== sessionId && childIds.indexOf(item.id) === -1;
     });
-    state.draft.edges = state.draft.edges.filter(function (edge) {
+    draft.edges = draft.edges.filter(function (edge) {
       return edge.from !== sessionId && edge.to !== sessionId && childIds.indexOf(edge.from) === -1 && childIds.indexOf(edge.to) === -1;
     });
-    childIds.concat([sessionId]).forEach(function (id) { delete state.draft.payloadByNodeId[id]; });
+    childIds.concat([sessionId]).forEach(function (id) { delete draft.payloadByNodeId[id]; });
   }
 
   function removeNode(nodeId) {
@@ -1497,8 +1530,42 @@
   // Chat-driven edits on the open event: the conversation parses intent and
   // hands a structured command here, so all mutation stays in one place. Returns
   // a { ok, message } the chat echoes back as a confirmation.
+  // Adds n days (may be negative) to a YYYY-MM-DD string, returning the same
+  // format. Uses UTC so it never drifts across a daylight-saving boundary.
+  function addDays(dateStr, n) {
+    const clean = cleanText(dateStr);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(clean)) return '';
+    const parts = clean.split('-');
+    const date = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])));
+    date.setUTCDate(date.getUTCDate() + n);
+    const y = date.getUTCFullYear();
+    const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(date.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  // A short, human label for a session in change summaries: prefer its track
+  // (AMER, EMEA...) and fall back to the full title.
+  function sessionLabel(sessionId) {
+    const track = cleanText(getSessionBasicsPayload(sessionId).track);
+    return track || getSessionTitle(sessionId);
+  }
+
+  // Snapshots the draft before dispatching so every successful mutation is
+  // undoable; drops the snapshot when the command was a no-op or failed.
   function applyEventEdit(command) {
     if (!state.isInitialized || !state.draft) return { ok: false, message: 'Open an event first.' };
+    snapshotForUndo();
+    const result = applyEventEditInner(command) || { ok: false, message: 'I can\'t do that yet.' };
+    if (result.ok) {
+      result.undoable = true;
+    } else {
+      state.editHistory.pop();
+    }
+    return result;
+  }
+
+  function applyEventEditInner(command) {
     const cmd = command || {};
     const sessions = state.draft.sessions || [];
 
@@ -1555,6 +1622,82 @@
       const name = getSessionTitle(cmd.sessionId);
       duplicateSession(cmd.sessionId);
       return { ok: true, message: `Duplicated "${name}".` };
+    }
+
+    // The attribute + bulk commands below all target one or more sessions via
+    // cmd.sessionIds, write the matching detail node, then recompute conflicts.
+    const targets = (cmd.sessionIds || []).filter(function (id) { return sessions.indexOf(id) > -1; });
+
+    function finishBulk(message, changes) {
+      computeConflicts(state.draft);
+      markDirty();
+      renderAll();
+      return { ok: true, message: message, changes: changes };
+    }
+
+    if (cmd.type === 'set-capacity') {
+      if (!targets.length) return { ok: false, message: 'I could not find those sessions.' };
+      const value = cleanText(cmd.value);
+      if (!/^\d+$/.test(value)) return { ok: false, message: 'Give me a capacity number.' };
+      const changes = targets.map(function (id) {
+        const before = cleanText(getSessionChildPayload(state.draft, id, NODE_TYPES.SESSION_CAPACITY).capacity);
+        setSessionChildData(id, NODE_TYPES.SESSION_CAPACITY, { capacity: value });
+        return `${sessionLabel(id)} ${before || '—'} -> ${value}`;
+      });
+      const message = targets.length === 1
+        ? `Set ${sessionLabel(targets[0])} capacity to ${value}.`
+        : `Set capacity to ${value} on all ${targets.length} sessions.`;
+      return finishBulk(message, changes);
+    }
+
+    if (cmd.type === 'set-venue-mode') {
+      if (!targets.length) return { ok: false, message: 'I could not find those sessions.' };
+      const mode = cmd.value === 'virtual' ? 'virtual' : 'physical';
+      const modeLabel = mode === 'virtual' ? 'virtual' : 'in person';
+      const changes = targets.map(function (id) {
+        setSessionChildData(id, NODE_TYPES.SESSION_VENUE, { venueMode: mode });
+        return `${sessionLabel(id)} -> ${modeLabel}`;
+      });
+      const message = targets.length === 1
+        ? `Made ${sessionLabel(targets[0])} ${modeLabel}.`
+        : `Made all ${targets.length} sessions ${modeLabel}.`;
+      return finishBulk(message, changes);
+    }
+
+    if (cmd.type === 'add-instructor') {
+      if (!targets.length) return { ok: false, message: 'I could not find those sessions.' };
+      const name = cleanText(cmd.value);
+      if (!name) return { ok: false, message: 'Who should I add as the instructor?' };
+      const changes = targets.map(function (id) {
+        const entries = (getSessionInstructorsPayload(id).entries || []).slice();
+        entries.push({ name: name, email: '' });
+        setSessionChildData(id, NODE_TYPES.SESSION_INSTRUCTORS, { entries: entries });
+        return `${sessionLabel(id)}: +${name}`;
+      });
+      const message = targets.length === 1
+        ? `Added ${name} as an instructor on ${sessionLabel(targets[0])}.`
+        : `Added ${name} as an instructor on all ${targets.length} sessions.`;
+      return finishBulk(message, changes);
+    }
+
+    if (cmd.type === 'shift-dates') {
+      if (!targets.length) return { ok: false, message: 'I could not find those sessions.' };
+      const days = Number(cmd.value);
+      if (!days) return { ok: false, message: 'By how many days should I shift them?' };
+      const changes = [];
+      targets.forEach(function (id) {
+        const before = cleanText(getSessionSchedulePayload(id).date);
+        const after = addDays(before, days);
+        if (!after) return;
+        setSessionChildData(id, NODE_TYPES.SESSION_SCHEDULE, { date: after });
+        changes.push(`${sessionLabel(id)} ${before} -> ${after}`);
+      });
+      if (!changes.length) return { ok: false, message: 'Those sessions have no dates to shift yet.' };
+      const phrase = cmd.phrase || `${Math.abs(days)} day${Math.abs(days) === 1 ? '' : 's'} ${days < 0 ? 'earlier' : 'later'}`;
+      const message = changes.length === 1
+        ? `Shifted ${sessionLabel(targets[0])} ${phrase}.`
+        : `Shifted all ${changes.length} sessions ${phrase}.`;
+      return finishBulk(message, changes);
     }
 
     return { ok: false, message: 'I can\'t do that yet.' };
@@ -2837,6 +2980,21 @@
       }
     }
 
+    // Reconcile the session count to the rows the human left on the card:
+    // adding rows creates real sessions, removing them deletes trailing ones.
+    // Skipped when no session edits are present so seeded defaults are kept.
+    if (Array.isArray(edits.sessions) && edits.sessions.length) {
+      const desired = Math.max(1, edits.sessions.length);
+      while (draft.sessions.length < desired) {
+        addNodeByType(draft, NODE_TYPES.SESSION, false);
+        syncGraphStructure(draft);
+      }
+      while (draft.sessions.length > desired) {
+        removeSessionBranch(draft.sessions[draft.sessions.length - 1], draft);
+        syncGraphStructure(draft);
+      }
+    }
+
     (edits.sessions || []).forEach(function (edit, i) {
       const sessionId = draft.sessions[i];
       if (!sessionId) return;
@@ -3696,56 +3854,27 @@
       : '';
 
     if (isEmbeddedWorkspace) {
-      const summaryHost = document.getElementById('workspace-event-saved-summary');
-      if (!summaryHost) return;
-
-      const program = getProgramSummary() || { sessionCount: 0, instructorCount: 0, conflictCount: 0 };
-      const sync = getEnterpriseSyncSummary();
-      const syncMarkup = sync && sync.hasIntegrations ? `
-        <div class="event-sync-summary" id="event-sync-summary">
-          <h3>Enterprise sync</h3>
-          <ul class="event-sync-list">
-            ${sync.enrolled ? `<li class="event-sync-item is-enroll"><span class="event-sync-provider">Workday Learning</span> enrolled ${sync.enrolled} learner${sync.enrolled === 1 ? '' : 's'}${sync.audience && sync.audience.due ? ` \u00b7 due ${escapeHtml(sync.audience.due)}` : ''}</li>` : ''}
-            ${sync.invites ? `<li class="event-sync-item is-calendar"><span class="event-sync-provider">Outlook</span> sent calendar invites for ${sync.invites} session${sync.invites === 1 ? '' : 's'}</li>` : ''}
-            ${sync.rooms ? `<li class="event-sync-item is-room"><span class="event-sync-provider">Facilities</span> reserved ${sync.rooms} room${sync.rooms === 1 ? '' : 's'}</li>` : ''}
-            ${sync.videos ? `<li class="event-sync-item is-video"><span class="event-sync-provider">Zoom</span> created ${sync.videos} meeting link${sync.videos === 1 ? '' : 's'}</li>` : ''}
-          </ul>
-        </div>
-      ` : '';
-
-      const firstSessionId = state.draft.sessions[0];
-      const firstSchedule = firstSessionId ? getSessionSchedulePayload(firstSessionId) : null;
-      const whenParts = [];
-      if (firstSchedule && firstSchedule.date) whenParts.push(genFormatDateShort(firstSchedule.date));
-      if (firstSchedule && firstSchedule.startTime) {
-        whenParts.push(`${firstSchedule.startTime}\u2013${firstSchedule.endTime}`);
+      // Publishing no longer dumps the admin onto the generic home. The chat
+      // layer owns the post-publish moment: it posts a recap turn (keeping the
+      // canvas open) with an "Open event" action that reveals the Event Overview.
+      if (typeof state.onEventPublished === 'function') {
+        const program = getProgramSummary() || { sessionCount: 0, instructorCount: 0 };
+        const firstSessionId = state.draft.sessions[0];
+        const firstSchedule = firstSessionId ? getSessionSchedulePayload(firstSessionId) : null;
+        const whenParts = [];
+        if (firstSchedule && firstSchedule.date) whenParts.push(genFormatDateShort(firstSchedule.date));
+        if (firstSchedule && firstSchedule.startTime) {
+          whenParts.push(`${firstSchedule.startTime}\u2013${firstSchedule.endTime}`);
+        }
+        state.onEventPublished({
+          title: basicsPayload.title || 'Untitled event',
+          sessionCount: program.sessionCount,
+          instructorCount: program.instructorCount,
+          whenText: whenParts.join(' '),
+          publishedAt: publishedAt,
+          sync: getEnterpriseSyncSummary()
+        });
       }
-      const whenText = whenParts.join(' ');
-      const madeFrom = (state.draft.meta.templateId || state.draft.meta.planId) ? 'Created from a template' : 'Created from scratch';
-
-      summaryHost.innerHTML = `
-        <h2><span class="event-publish-check" aria-hidden="true">\u2713</span> Event published</h2>
-        <p class="event-helper">${escapeHtml(basicsPayload.title || 'Untitled event')} \u00b7 ${program.sessionCount} session${program.sessionCount === 1 ? '' : 's'}${whenText ? ` \u00b7 starts ${escapeHtml(whenText)}` : ''}.</p>
-        <ul>
-          <li>${program.sessionCount} session${program.sessionCount === 1 ? '' : 's'}, ${program.instructorCount} instructor${program.instructorCount === 1 ? '' : 's'}, ${program.conflictCount} unresolved conflict${program.conflictCount === 1 ? '' : 's'}</li>
-          <li>${madeFrom}</li>
-          <li>Published at ${publishedAt}</li>
-          ${warningNote}
-        </ul>
-        ${syncMarkup}
-        <button type="button" class="home-task-action" id="workspace-return-to-event-button">Return to event editor</button>
-      `;
-      summaryHost.classList.remove('is-hidden');
-
-      const returnButton = document.getElementById('workspace-return-to-event-button');
-      if (returnButton) {
-        returnButton.addEventListener('click', function () {
-          summaryHost.classList.add('is-hidden');
-          if (window.openEventWorkspace) window.openEventWorkspace({ skipConfirm: true });
-        }, { once: true });
-      }
-
-      if (window.closeEventWorkspace) window.closeEventWorkspace({ preserveView: true });
       return;
     }
 
@@ -4737,6 +4866,7 @@
     previewFromText: previewFromText,
     buildDraftFromParams: buildDraftFromParams,
     applyEventEdit: applyEventEdit,
+    undoLastEdit: undoLastEdit,
     openProposalReview: openProposalReview,
     loadGeneratedDraft: loadGeneratedDraft,
     getConflicts: getConflicts,
@@ -4747,7 +4877,8 @@
     getEnterpriseSyncSummary: getEnterpriseSyncSummary,
     getViewMode: function () { return state.viewMode; },
     setNodeFocusHandler: function (handler) { state.onNodeFocus = typeof handler === 'function' ? handler : null; },
-    setEventBuiltHandler: function (handler) { state.onEventBuilt = typeof handler === 'function' ? handler : null; }
+    setEventBuiltHandler: function (handler) { state.onEventBuilt = typeof handler === 'function' ? handler : null; },
+    setEventPublishedHandler: function (handler) { state.onEventPublished = typeof handler === 'function' ? handler : null; }
   };
 
   initializeEditor();
