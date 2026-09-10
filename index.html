@@ -240,12 +240,30 @@
         </section>
       </div>
       <div class="workspace-event-overview-view is-hidden" id="workspace-event-overview-view" aria-hidden="true">
-        <header class="content-pane-header content-pane-header-workspace">
-          <div class="workspace-header-copy">
-            <h1>Event overview</h1>
+        <header class="content-pane-header content-pane-header-workspace event-overview-toolbar">
+          <div class="event-toolbar-left">
+            <button type="button" class="event-toolbar-icon" id="event-overview-back-button" aria-label="Back to editor">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+            </button>
+            <button type="button" class="event-toolbar-icon" id="event-overview-home-button" aria-label="Home" title="Preview only in this prototype">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
+            </button>
+            <div class="event-toolbar-copy">
+              <h1 id="event-overview-heading" class="event-toolbar-title">Event overview</h1>
+              <p id="event-overview-breadcrumb" class="event-toolbar-breadcrumb"></p>
+            </div>
           </div>
-          <div class="workspace-header-actions">
-            <button type="button" class="home-task-action" id="event-overview-back-button">Back to editor</button>
+          <div class="event-toolbar-right">
+            <div class="event-toolbar-toggle" role="group" aria-label="Event mode">
+              <button type="button" class="event-toolbar-toggle-btn is-active" id="event-overview-manage-button" aria-current="true">Manage Event</button>
+              <button type="button" class="event-toolbar-toggle-btn" id="event-overview-view-button">View Event</button>
+            </div>
+            <button type="button" class="event-toolbar-icon" aria-label="Help" title="Preview only in this prototype">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .8-1 1.7"/><path d="M12 17h.01"/></svg>
+            </button>
+            <button type="button" class="event-toolbar-icon" aria-label="More" title="Preview only in this prototype">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg>
+            </button>
           </div>
         </header>
         <div class="content-pane-divider"></div>

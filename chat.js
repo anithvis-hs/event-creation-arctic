@@ -25,6 +25,8 @@
   const workspaceEventOverviewView = document.getElementById('workspace-event-overview-view');
   const eventOverviewRoot = document.getElementById('event-overview-root');
   const eventOverviewBackButton = document.getElementById('event-overview-back-button');
+  const eventOverviewManageButton = document.getElementById('event-overview-manage-button');
+  const eventOverviewViewButton = document.getElementById('event-overview-view-button');
   const draftProgramButton = document.getElementById('draft-program-button');
   const newChatBtn = document.getElementById('new-chat-button');
   const chatListBtn = document.getElementById('chat-list-button');
@@ -1512,6 +1514,7 @@
     workspaceEventOverviewView.setAttribute('aria-hidden', 'false');
     if (workspacePanel) workspacePanel.classList.add('is-event-workspace-active');
 
+    setEventOverviewMode('manage');
     setView('chat');
   }
 
@@ -1546,6 +1549,201 @@
     return parts.join(' \u00b7 ');
   }
 
+  // Compact inline icons for the overview. Static markup (no user data), so it
+  // is safe to assign via innerHTML; dynamic text always flows through `el`.
+  const OVERVIEW_ICONS = {
+    calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>',
+    users: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M16 19v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 19v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+    userCheck: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M16 19v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M17 11l2 2 4-4"/></svg>',
+    ticket: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4z"/><path d="M13 6v12"/></svg>',
+    pencil: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
+    pin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg>',
+    video: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="14" height="12" rx="2"/><path d="M22 8l-6 4 6 4z"/></svg>',
+    clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>'
+  };
+
+  const REGISTRATION_MODE_LABELS = {
+    'open-registration': 'Open registration',
+    'approval-required': 'Approval required',
+    'attendance-tracked': 'Attendance tracking'
+  };
+
+  // Maps IANA timezone continents onto the three enterprise regions plus an
+  // approximate horizontal position (0..1) for the cover's world motif.
+  const OVERVIEW_REGION_MAP = {
+    America: { label: 'AMER', x: 0.24 },
+    US: { label: 'AMER', x: 0.22 },
+    Canada: { label: 'AMER', x: 0.2 },
+    Mexico: { label: 'AMER', x: 0.26 },
+    Brazil: { label: 'AMER', x: 0.32 },
+    Europe: { label: 'EMEA', x: 0.5 },
+    Africa: { label: 'EMEA', x: 0.52 },
+    Atlantic: { label: 'EMEA', x: 0.44 },
+    Asia: { label: 'APAC', x: 0.74 },
+    Indian: { label: 'APAC', x: 0.68 },
+    Australia: { label: 'APAC', x: 0.84 },
+    Pacific: { label: 'APAC', x: 0.92 }
+  };
+
+  // Representative vertical position (0..1 of the cover height) per region, so a
+  // region's marker lands on its continent in the world-map motif below.
+  const OVERVIEW_REGION_Y = { AMER: 0.4, EMEA: 0.42, APAC: 0.36 };
+
+  // A stylized, self-contained world-map outline for the cover motif. Authored
+  // in the same 0..100 box as the orbit SVG (preserveAspectRatio="none"), so it
+  // fills the banner and stays aligned with the region markers. Illustrative,
+  // low-poly continents - not survey-grade geography.
+  const OVERVIEW_WORLD_MAP = [
+    'M8 24 Q14 18 24 20 Q30 22 29 30 Q27 36 30 40 L24 41 L22 49 Q17 47 16 41 Q10 36 9 30 Z',
+    'M28 56 Q34 54 35 62 Q34 72 30 84 Q27 80 27 70 Q25 62 28 56 Z',
+    'M46 24 Q52 22 55 26 Q53 30 55 33 Q50 34 48 31 Q45 28 46 24 Z',
+    'M47 40 Q55 38 58 44 Q57 54 52 64 Q49 72 47 62 Q45 52 46 46 Q45 42 47 40 Z',
+    'M56 22 Q70 16 84 22 Q88 28 82 32 Q86 38 78 40 Q70 44 64 40 Q58 36 57 30 Q55 26 56 22 Z',
+    'M78 63 Q86 61 89 67 Q87 73 80 73 Q76 69 78 63 Z'
+  ].join(' ');
+
+  function overviewIcon(name, className) {
+    const span = el('span', className || 'event-ov-icon');
+    span.setAttribute('aria-hidden', 'true');
+    if (OVERVIEW_ICONS[name]) span.innerHTML = OVERVIEW_ICONS[name];
+    return span;
+  }
+
+  // Deterministic hue (0..359) from the event identity, so every generated
+  // cover is distinct but stays inside the pale Arctic palette via CSS.
+  function overviewHue(seed) {
+    const str = String(seed || 'event');
+    let h = 0;
+    for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0;
+    return h % 360;
+  }
+
+  function deriveRegion(timezone) {
+    if (!timezone) return null;
+    const parts = String(timezone).split('/');
+    const city = (parts[1] || '').replace(/_/g, ' ');
+    const hit = OVERVIEW_REGION_MAP[parts[0]];
+    if (!hit) return { label: parts[0], city: city, x: 0.5 };
+    return { label: hit.label, city: city, x: hit.x };
+  }
+
+  function collectRegions(sessions) {
+    const seen = {};
+    const regions = [];
+    sessions.forEach(function (session) {
+      const region = deriveRegion(session.timezone);
+      if (!region || seen[region.label]) return;
+      seen[region.label] = true;
+      regions.push(region);
+    });
+    return regions;
+  }
+
+  function joinReadable(list) {
+    if (!list.length) return '';
+    if (list.length === 1) return list[0];
+    return list.slice(0, -1).join(', ') + ' and ' + list[list.length - 1];
+  }
+
+  function formatOverviewDate(iso) {
+    const date = new Date(iso + 'T00:00:00');
+    if (isNaN(date.getTime())) return iso;
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  function formatDateRange(sessions, fallback) {
+    const dates = sessions
+      .map(function (session) { return session.date; })
+      .filter(Boolean)
+      .sort();
+    if (!dates.length) return fallback || '';
+    const start = formatOverviewDate(dates[0]);
+    const end = formatOverviewDate(dates[dates.length - 1]);
+    return start === end ? start : start + ' \u2013 ' + end;
+  }
+
+  // A region's screen position on the cover: spread horizontally by longitude,
+  // and vertically by its representative latitude so it sits on its continent.
+  function overviewRegionPoint(region) {
+    const y = OVERVIEW_REGION_Y[region.label] != null ? OVERVIEW_REGION_Y[region.label] : 0.44;
+    return { left: region.x * 100, top: y * 100 };
+  }
+
+  // The generated cover's world motif: a faint world-map outline, arcs linking
+  // the event's regions, and crisp HTML markers labelled AMER/EMEA/APAC.
+  function buildCoverMap(regions) {
+    const NS = 'http://www.w3.org/2000/svg';
+    const wrap = el('div', 'event-cover-map');
+    wrap.setAttribute('aria-hidden', 'true');
+
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('class', 'event-cover-orbit');
+    svg.setAttribute('viewBox', '0 0 100 100');
+    svg.setAttribute('preserveAspectRatio', 'none');
+
+    const worldMap = document.createElementNS(NS, 'path');
+    worldMap.setAttribute('class', 'event-cover-worldmap');
+    worldMap.setAttribute('d', OVERVIEW_WORLD_MAP);
+    svg.appendChild(worldMap);
+
+    const points = regions.map(function (region) { return overviewRegionPoint(region); });
+    if (points.length >= 2) {
+      let d = 'M' + points[0].left + ' ' + points[0].top;
+      for (let i = 1; i < points.length; i++) {
+        const a = points[i - 1];
+        const b = points[i];
+        const mx = (a.left + b.left) / 2;
+        const my = Math.min(a.top, b.top) - 14;
+        d += ' Q' + mx + ' ' + my + ' ' + b.left + ' ' + b.top;
+      }
+      const link = document.createElementNS(NS, 'path');
+      link.setAttribute('class', 'event-cover-link');
+      link.setAttribute('d', d);
+      svg.appendChild(link);
+    }
+    wrap.appendChild(svg);
+
+    const nodes = el('div', 'event-cover-nodes');
+    regions.forEach(function (region, index) {
+      const point = overviewRegionPoint(region);
+      const marker = el('div', 'event-cover-marker');
+      marker.style.left = point.left + '%';
+      marker.style.top = point.top + '%';
+      marker.style.setProperty('--marker-delay', (index * 110) + 'ms');
+      marker.appendChild(el('span', 'event-cover-dot'));
+      marker.appendChild(el('span', 'event-cover-tick', region.label));
+      nodes.appendChild(marker);
+    });
+    wrap.appendChild(nodes);
+    return wrap;
+  }
+
+  // The generated banner: a standalone Arctic-native cover derived from the
+  // data the agent assembled — a hue keyed off the event and a world motif of
+  // its regions — so it always reflects the real event without a photo.
+  function buildEventCover(opts) {
+    const cover = el('figure', 'event-cover');
+    cover.style.setProperty('--cover-h', String(opts.hue));
+    cover.appendChild(buildCoverMap(opts.regions));
+
+    const edit = el('button', 'event-cover-edit');
+    edit.type = 'button';
+    edit.title = 'Edit in editor';
+    edit.setAttribute('aria-label', 'Edit event in editor');
+    edit.appendChild(overviewIcon('pencil'));
+    edit.addEventListener('click', closeEventOverview);
+    cover.appendChild(edit);
+
+    return cover;
+  }
+
+  function buildSessionMetaRow(iconName, text) {
+    const row = el('p', 'event-session-meta');
+    row.appendChild(overviewIcon(iconName));
+    row.appendChild(el('span', 'event-session-meta-text', text));
+    return row;
+  }
+
   function renderEventOverview(summary) {
     if (!eventOverviewRoot) return;
     eventOverviewRoot.innerHTML = '';
@@ -1558,114 +1756,209 @@
       || (typeof admin.getEnterpriseSyncSummary === 'function' ? admin.getEnterpriseSyncSummary() : null);
 
     const title = (context && context.eventTitle) || info.title || 'Untitled event';
+    const spot = (context && context.eventSpot) || '';
     const sessions = (context && context.sessions) || [];
     const sessionCount = program ? program.sessionCount : (info.sessionCount || sessions.length);
     const instructorCount = program ? program.instructorCount : (info.instructorCount || 0);
+    const instructorNames = (program && program.instructorNames) || [];
     const registrationLabel = (program && program.registrationLabel) || 'Not set';
+    const registrationModes = (context && context.registrationModes) || [];
+    const regions = collectRegions(sessions);
+    const regionLabels = regions.map(function (region) { return region.label; });
+    const dateRange = formatDateRange(sessions, info.whenText);
+    const hue = overviewHue(title + '|' + spot);
 
-    // Header: title + published status.
-    const header = el('div', 'event-overview-header');
-    header.appendChild(el('h2', 'event-overview-title', title));
-    const statusRow = el('div', 'event-overview-status');
-    statusRow.appendChild(el('span', 'event-overview-pill', 'Published'));
-    if (info.publishedAt) statusRow.appendChild(el('span', 'event-overview-meta', 'Published at ' + info.publishedAt));
-    header.appendChild(statusRow);
-    eventOverviewRoot.appendChild(header);
+    // Toolbar heading carries the event title; the breadcrumb echoes the Spot,
+    // the record type, and (once live) the publish time.
+    const heading = document.getElementById('event-overview-heading');
+    if (heading) heading.textContent = title;
 
-    // Stat tiles.
+    const breadcrumb = document.getElementById('event-overview-breadcrumb');
+    if (breadcrumb) {
+      breadcrumb.innerHTML = '';
+      const crumbs = [];
+      if (spot) {
+        const spotCrumb = el('span', 'event-toolbar-crumb');
+        const spotLink = el('a', 'event-toolbar-link', spot);
+        spotLink.href = '#';
+        spotLink.title = 'Preview only in this prototype';
+        spotLink.addEventListener('click', function (event) { event.preventDefault(); });
+        spotCrumb.appendChild(spotLink);
+        crumbs.push(spotCrumb);
+      }
+      const typeCrumb = el('span', 'event-toolbar-crumb');
+      typeCrumb.appendChild(overviewIcon('calendar'));
+      typeCrumb.appendChild(el('span', null, 'Event'));
+      crumbs.push(typeCrumb);
+      if (info.publishedAt) {
+        crumbs.push(el('span', 'event-toolbar-crumb', 'Published ' + info.publishedAt));
+      }
+      crumbs.forEach(function (crumb, index) {
+        if (index > 0) breadcrumb.appendChild(el('span', 'event-toolbar-sep', '\u00b7'));
+        breadcrumb.appendChild(crumb);
+      });
+    }
+
+    // Presentational section tabs (mirrors the product IA; Overview is live).
+    const tabs = el('nav', 'event-overview-tabs');
+    tabs.setAttribute('aria-label', 'Event sections');
+    ['Overview', 'Enrolment', 'Registration & Attendance', 'Reports', 'Settings'].forEach(function (label, index) {
+      const tab = el('button', 'event-overview-tab' + (index === 0 ? ' is-active' : ''), label);
+      tab.type = 'button';
+      if (index === 0) {
+        tab.setAttribute('aria-current', 'page');
+      } else {
+        tab.title = 'Preview only in this prototype';
+      }
+      tabs.appendChild(tab);
+    });
+    eventOverviewRoot.appendChild(tabs);
+
+    // Hero: generated cover + at-a-glance details.
+    const hero = el('section', 'event-overview-hero');
+
+    hero.appendChild(buildEventCover({ hue: hue, regions: regions }));
+
+    const heroInfo = el('aside', 'event-hero-info');
+
+    if (dateRange) {
+      const dateLine = el('p', 'event-hero-daterange');
+      dateLine.appendChild(overviewIcon('calendar'));
+      dateLine.appendChild(el('span', null, dateRange));
+      heroInfo.appendChild(dateLine);
+    }
+
+    heroInfo.appendChild(el('h2', 'event-hero-title', title));
+
+    const chipSource = registrationModes.length
+      ? registrationModes.map(function (id) { return REGISTRATION_MODE_LABELS[id] || id; })
+      : (registrationLabel && registrationLabel !== 'Not set' ? [registrationLabel] : []);
+    if (chipSource.length) {
+      const chips = el('ul', 'event-hero-chips');
+      chipSource.forEach(function (label) {
+        chips.appendChild(el('li', 'event-chip', label));
+      });
+      heroInfo.appendChild(chips);
+    }
+
+    // Auto-summary in place of a free-text description: a truthful sentence
+    // built from the data, so the overview never shows placeholder copy.
+    const summaryParts = [];
+    if (sessionCount) {
+      summaryParts.push(sessionCount + ' session' + (sessionCount === 1 ? '' : 's')
+        + (regionLabels.length ? ' across ' + joinReadable(regionLabels) : ''));
+    }
+    if (sync && sync.enrolled) {
+      summaryParts.push(sync.enrolled + ' learner' + (sync.enrolled === 1 ? '' : 's')
+        + ' enrolled from Workday Learning');
+    }
+    if (instructorNames.length) {
+      summaryParts.push('Led by ' + joinReadable(instructorNames));
+    }
+    if (summaryParts.length) {
+      heroInfo.appendChild(el('p', 'event-hero-summary', summaryParts.join('. ') + '.'));
+    }
+
+    const facts = el('dl', 'event-hero-facts');
+    function addFact(key, value) {
+      if (!value) return;
+      facts.appendChild(el('dt', 'event-hero-fact-key', key));
+      facts.appendChild(el('dd', 'event-hero-fact-val', value));
+    }
+    addFact('Spot', spot);
+    addFact('Starts', info.whenText || dateRange);
+    if (regionLabels.length) addFact('Regions', joinReadable(regionLabels));
+    if (facts.childNodes.length) heroInfo.appendChild(facts);
+
+    hero.appendChild(heroInfo);
+    eventOverviewRoot.appendChild(hero);
+
+    // Stat strip.
     const stats = el('div', 'event-overview-stats');
     const tiles = [
-      { label: 'Sessions', value: String(sessionCount) },
-      { label: 'Instructors', value: String(instructorCount) },
-      { label: 'Registration', value: registrationLabel }
+      { icon: 'calendar', label: sessionCount === 1 ? 'Session' : 'Sessions', value: String(sessionCount) },
+      { icon: 'users', label: instructorCount === 1 ? 'Instructor' : 'Instructors', value: String(instructorCount) }
     ];
-    if (sync && sync.enrolled) tiles.push({ label: 'Enrolled', value: String(sync.enrolled) });
+    if (sync && sync.enrolled) tiles.push({ icon: 'userCheck', label: 'Enrolled', value: String(sync.enrolled) });
+    tiles.push({ icon: 'ticket', label: 'Registration', value: registrationLabel });
     tiles.forEach(function (tile) {
-      const tileEl = el('div', 'event-overview-stat');
-      tileEl.appendChild(el('span', 'event-overview-stat-value', tile.value));
-      tileEl.appendChild(el('span', 'event-overview-stat-label', tile.label));
+      const tileEl = el('div', 'event-stat');
+      tileEl.appendChild(overviewIcon(tile.icon, 'event-stat-icon'));
+      const text = el('div', 'event-stat-text');
+      text.appendChild(el('span', 'event-stat-value', tile.value));
+      text.appendChild(el('span', 'event-stat-label', tile.label));
+      tileEl.appendChild(text);
       stats.appendChild(tileEl);
     });
     eventOverviewRoot.appendChild(stats);
 
-    // Details.
-    const spot = (context && context.eventSpot) || '';
-    if (spot || info.whenText) {
-      const detailList = el('dl', 'event-overview-details');
-      if (spot) {
-        detailList.appendChild(el('dt', 'event-overview-detail-key', 'Spot'));
-        detailList.appendChild(el('dd', 'event-overview-detail-val', spot));
-      }
-      if (info.whenText) {
-        detailList.appendChild(el('dt', 'event-overview-detail-key', 'Starts'));
-        detailList.appendChild(el('dd', 'event-overview-detail-val', info.whenText));
-      }
-      eventOverviewRoot.appendChild(detailList);
-    }
+    // Sessions.
+    const sessionsSection = el('section', 'event-overview-section');
+    const sectionHead = el('div', 'event-section-head');
+    sectionHead.appendChild(el('h3', 'event-section-title', 'Sessions'));
+    if (sessions.length) sectionHead.appendChild(el('span', 'event-section-count', String(sessions.length)));
+    sessionsSection.appendChild(sectionHead);
 
-    // Sessions list.
-    const sessionsSection = el('div', 'event-overview-section');
-    sessionsSection.appendChild(el('h3', 'event-overview-section-title', 'Sessions'));
-    const list = el('ul', 'event-overview-sessions');
+    const list = el('ul', 'event-sessions');
     sessions.forEach(function (session, index) {
-      const item = el('li', 'event-overview-session');
-      const top = el('div', 'event-overview-session-top');
-      top.appendChild(el('span', 'event-overview-session-index', String(index + 1)));
-      top.appendChild(el('span', 'event-overview-session-title', session.title || 'Session ' + (index + 1)));
-      item.appendChild(top);
+      const isVirtual = session.venueMode === 'virtual';
+      const card = el('li', 'event-session-card');
 
-      const when = formatSessionWhen(session);
-      if (when) item.appendChild(el('p', 'event-overview-session-meta', when));
+      const thumb = el('div', 'event-session-thumb ' + (isVirtual ? 'is-virtual' : 'is-inperson'));
+      thumb.appendChild(overviewIcon(isVirtual ? 'video' : 'pin', 'event-session-thumb-icon'));
+      card.appendChild(thumb);
+
+      const body = el('div', 'event-session-body');
+      const top = el('div', 'event-session-top');
+      top.appendChild(el('span', 'event-session-index', 'Session ' + (index + 1)));
+      top.appendChild(el('span', 'event-session-tag ' + (isVirtual ? 'is-virtual' : 'is-inperson'), isVirtual ? 'Virtual' : 'In person'));
+      body.appendChild(top);
+      body.appendChild(el('h4', 'event-session-title', session.title || 'Session ' + (index + 1)));
+
+      const region = deriveRegion(session.timezone);
+      const whenParts = [];
+      if (session.date) whenParts.push(formatOverviewDate(session.date));
+      if (session.startTime) whenParts.push(session.startTime + (session.endTime ? '\u2013' + session.endTime : ''));
+      if (region && region.city) whenParts.push(region.city + ' (' + region.label + ')');
+      else if (session.timezone) whenParts.push(session.timezone);
+      if (whenParts.length) body.appendChild(buildSessionMetaRow('clock', whenParts.join(' \u00b7 ')));
 
       const logistics = [];
-      if (session.venueMode === 'virtual') logistics.push('Virtual');
-      else if (session.venueMode) logistics.push('In person');
       if (session.location) logistics.push(session.location);
       if (session.capacity) logistics.push(session.capacity + ' seats');
       if (session.instructors && session.instructors.length) logistics.push(session.instructors.join(', '));
-      if (logistics.length) item.appendChild(el('p', 'event-overview-session-meta', logistics.join(' \u00b7 ')));
+      if (logistics.length) body.appendChild(buildSessionMetaRow(isVirtual ? 'video' : 'pin', logistics.join(' \u00b7 ')));
 
-      list.appendChild(item);
+      card.appendChild(body);
+      list.appendChild(card);
     });
     sessionsSection.appendChild(list);
     eventOverviewRoot.appendChild(sessionsSection);
-
-    // Enterprise sync summary.
-    if (sync && sync.hasIntegrations) {
-      const syncBox = el('div', 'event-sync-summary');
-      syncBox.appendChild(el('h3', null, 'Enterprise sync'));
-      const syncList = el('ul', 'event-sync-list');
-      if (sync.enrolled) {
-        const li = el('li', 'event-sync-item is-enroll');
-        li.appendChild(el('span', 'event-sync-provider', 'Workday Learning'));
-        li.appendChild(document.createTextNode(' enrolled ' + sync.enrolled + ' learner' + (sync.enrolled === 1 ? '' : 's')));
-        syncList.appendChild(li);
-      }
-      if (sync.invites) {
-        const li = el('li', 'event-sync-item is-calendar');
-        li.appendChild(el('span', 'event-sync-provider', 'Outlook'));
-        li.appendChild(document.createTextNode(' sent ' + sync.invites + ' calendar invite' + (sync.invites === 1 ? '' : 's')));
-        syncList.appendChild(li);
-      }
-      if (sync.rooms) {
-        const li = el('li', 'event-sync-item is-room');
-        li.appendChild(el('span', 'event-sync-provider', 'Facilities'));
-        li.appendChild(document.createTextNode(' reserved ' + sync.rooms + ' room' + (sync.rooms === 1 ? '' : 's')));
-        syncList.appendChild(li);
-      }
-      if (sync.videos) {
-        const li = el('li', 'event-sync-item is-video');
-        li.appendChild(el('span', 'event-sync-provider', 'Zoom'));
-        li.appendChild(document.createTextNode(' created ' + sync.videos + ' meeting link' + (sync.videos === 1 ? '' : 's')));
-        syncList.appendChild(li);
-      }
-      syncBox.appendChild(syncList);
-      eventOverviewRoot.appendChild(syncBox);
-    }
   }
 
   if (eventOverviewBackButton) {
     eventOverviewBackButton.addEventListener('click', closeEventOverview);
+  }
+
+  function setEventOverviewMode(mode) {
+    const isView = mode === 'view';
+    if (workspaceEventOverviewView) workspaceEventOverviewView.classList.toggle('is-view-mode', isView);
+    if (eventOverviewManageButton) {
+      eventOverviewManageButton.classList.toggle('is-active', !isView);
+      eventOverviewManageButton[(!isView ? 'setAttribute' : 'removeAttribute')]('aria-current', 'true');
+    }
+    if (eventOverviewViewButton) {
+      eventOverviewViewButton.classList.toggle('is-active', isView);
+      eventOverviewViewButton[(isView ? 'setAttribute' : 'removeAttribute')]('aria-current', 'true');
+    }
+  }
+
+  if (eventOverviewManageButton) {
+    eventOverviewManageButton.addEventListener('click', function () { setEventOverviewMode('manage'); });
+  }
+
+  if (eventOverviewViewButton) {
+    eventOverviewViewButton.addEventListener('click', function () { setEventOverviewMode('view'); });
   }
 
   function isIndexPage() {
