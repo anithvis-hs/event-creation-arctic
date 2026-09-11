@@ -1571,36 +1571,24 @@
   // Maps IANA timezone continents onto the three enterprise regions plus an
   // approximate horizontal position (0..1) for the cover's world motif.
   const OVERVIEW_REGION_MAP = {
-    America: { label: 'AMER', x: 0.24 },
-    US: { label: 'AMER', x: 0.22 },
-    Canada: { label: 'AMER', x: 0.2 },
-    Mexico: { label: 'AMER', x: 0.26 },
-    Brazil: { label: 'AMER', x: 0.32 },
+    America: { label: 'AMER', x: 0.26 },
+    US: { label: 'AMER', x: 0.26 },
+    Canada: { label: 'AMER', x: 0.24 },
+    Mexico: { label: 'AMER', x: 0.27 },
+    Brazil: { label: 'AMER', x: 0.33 },
     Europe: { label: 'EMEA', x: 0.5 },
-    Africa: { label: 'EMEA', x: 0.52 },
-    Atlantic: { label: 'EMEA', x: 0.44 },
-    Asia: { label: 'APAC', x: 0.74 },
+    Africa: { label: 'EMEA', x: 0.54 },
+    Atlantic: { label: 'EMEA', x: 0.46 },
+    Asia: { label: 'APAC', x: 0.72 },
     Indian: { label: 'APAC', x: 0.68 },
     Australia: { label: 'APAC', x: 0.84 },
-    Pacific: { label: 'APAC', x: 0.92 }
+    Pacific: { label: 'APAC', x: 0.9 }
   };
 
   // Representative vertical position (0..1 of the cover height) per region, so a
-  // region's marker lands on its continent in the world-map motif below.
-  const OVERVIEW_REGION_Y = { AMER: 0.4, EMEA: 0.42, APAC: 0.36 };
-
-  // A stylized, self-contained world-map outline for the cover motif. Authored
-  // in the same 0..100 box as the orbit SVG (preserveAspectRatio="none"), so it
-  // fills the banner and stays aligned with the region markers. Illustrative,
-  // low-poly continents - not survey-grade geography.
-  const OVERVIEW_WORLD_MAP = [
-    'M8 24 Q14 18 24 20 Q30 22 29 30 Q27 36 30 40 L24 41 L22 49 Q17 47 16 41 Q10 36 9 30 Z',
-    'M28 56 Q34 54 35 62 Q34 72 30 84 Q27 80 27 70 Q25 62 28 56 Z',
-    'M46 24 Q52 22 55 26 Q53 30 55 33 Q50 34 48 31 Q45 28 46 24 Z',
-    'M47 40 Q55 38 58 44 Q57 54 52 64 Q49 72 47 62 Q45 52 46 46 Q45 42 47 40 Z',
-    'M56 22 Q70 16 84 22 Q88 28 82 32 Q86 38 78 40 Q70 44 64 40 Q58 36 57 30 Q55 26 56 22 Z',
-    'M78 63 Q86 61 89 67 Q87 73 80 73 Q76 69 78 63 Z'
-  ].join(' ');
+  // region's marker lands on its continent in the world map below. Tuned by eye
+  // against the equirectangular map asset (which crops the poles).
+  const OVERVIEW_REGION_Y = { AMER: 0.31, EMEA: 0.27, APAC: 0.37 };
 
   function overviewIcon(name, className) {
     const span = el('span', className || 'event-ov-icon');
@@ -1669,22 +1657,22 @@
     return { left: region.x * 100, top: y * 100 };
   }
 
-  // The generated cover's world motif: a faint world-map outline, arcs linking
+  // The generated cover's world motif: a real (muted) world map, arcs linking
   // the event's regions, and crisp HTML markers labelled AMER/EMEA/APAC.
   function buildCoverMap(regions) {
     const NS = 'http://www.w3.org/2000/svg';
     const wrap = el('div', 'event-cover-map');
     wrap.setAttribute('aria-hidden', 'true');
 
+    const worldImg = el('img', 'event-cover-worldmap-img');
+    worldImg.src = 'assets/world-map.svg';
+    worldImg.alt = '';
+    wrap.appendChild(worldImg);
+
     const svg = document.createElementNS(NS, 'svg');
     svg.setAttribute('class', 'event-cover-orbit');
     svg.setAttribute('viewBox', '0 0 100 100');
     svg.setAttribute('preserveAspectRatio', 'none');
-
-    const worldMap = document.createElementNS(NS, 'path');
-    worldMap.setAttribute('class', 'event-cover-worldmap');
-    worldMap.setAttribute('d', OVERVIEW_WORLD_MAP);
-    svg.appendChild(worldMap);
 
     const points = regions.map(function (region) { return overviewRegionPoint(region); });
     if (points.length >= 2) {
