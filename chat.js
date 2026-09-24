@@ -7,6 +7,25 @@
   const TITLE_SAVE_ICON = 'assets/check.svg';
   const DEFAULT_CHAT_TITLE = 'New chat';
   const DEMO_EVENT_BASICS_TITLE = 'Sales Strategies and Approaches 2026';
+  const EVENT_CHAT_TITLE = 'New event';
+  const EVENT_CHAT_PLACEHOLDER = 'Describe the event you want to run\u2026';
+
+  // Same three prompts the workspace cold start offers (event-editor-shell.js),
+  // so both describe-your-event surfaces teach the same shape of input.
+  const EVENT_PROMPT_EXAMPLES = [
+    {
+      label: 'New-hire onboarding',
+      prompt: 'Two-part new-hire sales onboarding, weekly on Tuesdays at 10am, led by Priya Rao at the Enterprise Hub'
+    },
+    {
+      label: 'Product training',
+      prompt: 'One-day in-person product training at the Enterprise Hub on June 12 from 9am to 4pm'
+    },
+    {
+      label: 'Certification series',
+      prompt: 'Three-session certification series, approval required with attendance tracking'
+    }
+  ];
 
   const input        = document.getElementById('chat-input');
   const DEFAULT_CHAT_PLACEHOLDER = (input && input.dataset.placeholder) || 'Ask anything...';
@@ -25,8 +44,12 @@
   const workspaceEventOverviewView = document.getElementById('workspace-event-overview-view');
   const eventOverviewRoot = document.getElementById('event-overview-root');
   const eventOverviewBackButton = document.getElementById('event-overview-back-button');
+  const eventOverviewHomeButton = document.getElementById('event-overview-home-button');
   const eventOverviewManageButton = document.getElementById('event-overview-manage-button');
   const eventOverviewViewButton = document.getElementById('event-overview-view-button');
+  // Kept so switching between Manage and View can re-render the same event.
+  let eventOverviewSummary = null;
+  let eventOverviewMode = 'manage';
   const draftProgramButton = document.getElementById('draft-program-button');
   const newChatBtn = document.getElementById('new-chat-button');
   const chatListBtn = document.getElementById('chat-list-button');
@@ -60,20 +83,18 @@
         },
         {
           type: 'ai',
-          intro: 'I drafted a 3-session Sales Methodology certification, one parallel session per region, and I am opening it on the canvas now. Tweak anything from there, or just tell me what to change.',
+          intro: 'I drafted a 3-session Sales Methodology certification, one parallel session per region. Let me map it out and you can correct anything from there.',
           heading: 'Program drafted',
           details: [
             'Capacity is split 180 / 150 / 82 to match regional headcount, so no single region is oversubscribed.',
-            'AMER and EMEA both run on March 12 and APAC on March 13, which keeps the whole rollout inside one week and well ahead of the March 31 deadline.',
-            'Want me to finish setup? I\'ll enroll the audience and size each session to headcount, confirm times against calendars, and reserve rooms + Zoom in one pass.'
+            'AMER and EMEA both run on March 12 and APAC on March 13, which keeps the whole rollout inside one week and well ahead of the March 31 deadline.'
           ],
           generatedCard: {
             title: 'Sales Methodology Certification 2026',
             sessionCount: 3
           },
           actions: [
-            { label: 'Finish setup', enterpriseSetup: true },
-            { label: 'Not now', dismiss: true }
+            { label: 'Open it on the map', buildPlan: 'methodology-rollout' }
           ]
         }
       ]
@@ -331,24 +352,29 @@
   // Editable card: sections are gated by structure.step so the flow can present
   // Basics + Registration first (details) and the region rows second (sessions).
   // An absent step renders every section, preserving the single-card behavior.
+  // The 'refine' step renders against an event that already exists, so it only
+  // exposes the fields the apply-structure command can actually write back.
   function createEditableStructure(structure) {
     const sections = document.createElement('ol');
     sections.className = 'ai-structure-sections';
 
     const step = structure.step;
-    const showDetails = step === 'details' || !step;
-    const showSessions = step === 'sessions' || !step;
+    const isRefine = step === 'refine';
+    const showDetails = step === 'details' || isRefine || !step;
+    const showSessions = step === 'sessions' || isRefine || !step;
 
     if (showDetails) {
       const basics = structure.basics || {};
       const basicsSection = createStructureSection('Basics');
       basicsSection.appendChild(createBasicsField('title', 'Event title', basics.title, 'text'));
-      basicsSection.appendChild(createBasicsField('description', 'Description', basics.description, 'textarea'));
-      basicsSection.appendChild(createBasicsField('spot', 'Spot', basics.spot, 'select', [
-        'Northwest Spot',
-        'Enterprise Hub',
-        'Growth Lab'
-      ]));
+      if (!isRefine) {
+        basicsSection.appendChild(createBasicsField('description', 'Description', basics.description, 'textarea'));
+        basicsSection.appendChild(createBasicsField('spot', 'Spot', basics.spot, 'select', [
+          'Northwest Spot',
+          'Enterprise Hub',
+          'Growth Lab'
+        ]));
+      }
       sections.appendChild(basicsSection);
 
       const registration = structure.registration || {};
@@ -379,7 +405,10 @@
     const data = branch || {};
     const item = document.createElement('li');
     item.className = 'ai-structure-branch';
-    item.appendChild(createBranchField('name', 'Region', data.name, 'text'));
+    // Refine cards render from the live draft, so a row remembers which session
+    // it came from: rows without an id are additions, absent ids are removals.
+    if (data.id) item.dataset.sessionId = data.id;
+    item.appendChild(createBranchField('name', data.label || 'Region', data.name, 'text'));
     item.appendChild(createBranchField('capacity', 'Seats', data.capacity, 'number'));
     item.appendChild(createBranchField('date', 'Date', data.date, 'date'));
     item.appendChild(createBranchField('timezone', 'Timezone', data.timezone, 'text'));
@@ -564,6 +593,7 @@
     const sessions = [];
     root.querySelectorAll('.ai-structure-branch').forEach(function (row) {
       const edit = {};
+      if (row.dataset.sessionId) edit.id = row.dataset.sessionId;
       row.querySelectorAll('.ai-structure-input').forEach(function (input) {
         edit[input.dataset.field] = input.value;
       });
@@ -1001,10 +1031,20 @@
     });
 
     if (blockerIndex === -1) {
+      // No collision is not the same as ready: the publish checklist also
+      // covers unfilled required fields, so the turn reports what it knows
+      // rather than promising a clean run.
+      const readiness = typeof admin.getPublishReadiness === 'function' ? admin.getPublishReadiness() : null;
+      const outstanding = readiness ? readiness.blockers : 0;
       appendAiMessage({
         intro: 'The canvas is built and I found no scheduling collisions across the three branches.',
-        heading: 'Ready for review',
-        details: ['Open any node on the canvas to fill in the remaining details.']
+        heading: outstanding ? 'Almost ready' : 'Ready to publish',
+        details: [outstanding
+          ? (outstanding === 1
+            ? '1 required field still needs filling in. Publish will take you to it.'
+            : `${outstanding} required fields still need filling in. Publish will walk you through them.`)
+          : 'Everything the checklist looks for is filled in.'],
+        actions: [{ label: 'Publish', publish: true }]
       });
       return;
     }
@@ -1035,14 +1075,25 @@
       `${result.sessionTitle} moved from ${result.previousWindow} to ${result.nextWindow}${timezoneNote}. Its schedule node is selected on the canvas.`
     ];
 
+    const admin = window.ArcticEventAdmin;
+    const readiness = admin && typeof admin.getPublishReadiness === 'function' ? admin.getPublishReadiness() : null;
+    const outstanding = readiness ? readiness.blockers : 0;
+
     details.push(result.remainingConflicts
       ? `${result.remainingConflicts} other issue${result.remainingConflicts === 1 ? '' : 's'} still needs attention before publish.`
-      : 'No conflicts remain. The program is ready for review and publish.');
+      : (outstanding
+        ? (outstanding === 1
+          ? 'No conflicts remain, but 1 required field still needs filling in.'
+          : `No conflicts remain, but ${outstanding} required fields still need filling in.`)
+        : 'No conflicts remain. The program is ready to publish.'));
 
     appendAiMessage({
       intro: 'Done. I shifted the later session so the two no longer overlap, then re-checked the whole program.',
       heading: 'Conflict resolved',
-      details: details
+      details: details,
+      // Only offer the last step once the re-check came back clean; while
+      // issues remain the copy above is already saying there is more to do.
+      actions: result.remainingConflicts ? [] : [{ label: 'Publish', publish: true }]
     });
   }
 
@@ -1072,7 +1123,82 @@
       ],
       actions: [
         { label: 'Finish setup', enterpriseSetup: true },
-        { label: 'Not now', dismiss: true }
+        // Declining the extras should still land on the cross-session check,
+        // which is where the event becomes publishable either way.
+        { label: 'Not now', dismiss: true, then: appendConflictFollowUp }
+      ]
+    });
+  }
+
+  // Anything the agent cannot route gets an honest account of what it can do
+  // rather than filler. An off-script question is the most likely moment for
+  // the prototype to break character, so this is the copy that has to hold.
+  const FALLBACK_RESPONSE = {
+    intro: 'I can\u2019t help with that one yet \u2014 in this workspace I am the events agent, so here is what I am good for.',
+    heading: 'What I can do',
+    details: [
+      'Draft an event from a description. Tell me what you are running \u2014 "three-session certification series, approval required with attendance tracking" \u2014 and I will build the event and all of its sessions together and map them out.',
+      'Change an event that is already open. Say things like "shift session 2 one week later", "set capacity to 150 for EMEA", "make session 3 virtual", "rename session 1 to Kickoff", or "swap session 2 and 3". Every change comes with a one-click undo.',
+      'Finish the enterprise setup. Once the shape is right I can enroll the audience from Workday, confirm times against Outlook calendars, and reserve rooms plus Zoom links in a single pass.'
+    ]
+  };
+
+  // The refine beat: once the draft is on the map, the agent hands back an
+  // editable summary of what it actually built (read from the live draft, not
+  // from a script) so the human can correct it in the conversation instead of
+  // hunting through the inspector. Declining moves straight on to setup.
+  function offerRefine() {
+    const admin = window.ArcticEventAdmin;
+    if (!admin || typeof admin.getEventContext !== 'function') {
+      offerEnterpriseSetup();
+      return;
+    }
+
+    const context = admin.getEventContext();
+    if (!context || !Array.isArray(context.sessions) || !context.sessions.length) {
+      offerEnterpriseSetup();
+      return;
+    }
+
+    const modes = context.registrationModes || [];
+    const count = context.sessions.length;
+    const dates = context.sessions.map(function (session) { return session.date; }).filter(Boolean);
+    const details = [];
+    if (dates.length) {
+      const first = dates.slice().sort()[0];
+      const last = dates.slice().sort()[dates.length - 1];
+      details.push(first === last
+        ? 'Everything runs on ' + first + '.'
+        : 'The whole thing runs between ' + first + ' and ' + last + '.');
+    }
+    details.push('Change anything here and I\u2019ll update the map, or say it in plain words \u2014 "shift session 2 one week later" works too.');
+
+    appendAiMessage({
+      intro: 'That\u2019s ' + count + ' session' + (count === 1 ? '' : 's') + ' drafted and mapped out. Here\u2019s what I set \u2014 correct anything that looks wrong.',
+      heading: 'Refine the draft',
+      details: details,
+      structure: {
+        editable: true,
+        step: 'refine',
+        basics: { title: context.eventTitle },
+        registration: {
+          path: modes.indexOf('approval-required') > -1 ? 'approval-required' : 'open-registration',
+          attendance: modes.indexOf('attendance-tracked') > -1
+        },
+        branches: context.sessions.map(function (session) {
+          return {
+            id: session.id,
+            label: 'Session',
+            name: session.title,
+            capacity: session.capacity,
+            date: session.date,
+            timezone: session.timezone
+          };
+        })
+      },
+      actions: [
+        { label: 'Apply changes', applyStructure: true },
+        { label: 'Looks right', dismiss: true, then: offerEnterpriseSetup }
       ]
     });
   }
@@ -1139,27 +1265,25 @@
     p1.className = 'ai-response-text';
     p1.textContent = response && response.intro
       ? response.intro
-      : 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.';
+      : FALLBACK_RESPONSE.intro;
 
     const divider = document.createElement('div');
     divider.className = 'ai-response-divider';
 
     const block2 = document.createElement('div');
 
-    const heading = document.createElement('p');
-    heading.className = 'ai-response-heading';
-    heading.textContent = response && response.heading ? response.heading : 'Lorem ipsum summary';
-
     // An explicit details array (even empty) is respected; only fall back to
-    // placeholder copy when details is entirely absent.
-    const details = response && Array.isArray(response.details)
-      ? response.details
-      : [
-        'Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. Sed perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt.',
-        'Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt. Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet consectetur adipisci velit.'
-      ];
+    // the capability reply when details is entirely absent.
+    const isFallback = !(response && Array.isArray(response.details));
+    const details = isFallback ? FALLBACK_RESPONSE.details : response.details;
+    const headingText = (response && response.heading) || (isFallback ? FALLBACK_RESPONSE.heading : '');
 
-    block2.appendChild(heading);
+    if (headingText) {
+      const heading = document.createElement('p');
+      heading.className = 'ai-response-heading';
+      heading.textContent = headingText;
+      block2.appendChild(heading);
+    }
     details.forEach(function (detail, index) {
       const detailParagraph = document.createElement('p');
       detailParagraph.className = 'ai-response-text';
@@ -1221,6 +1345,33 @@
           return;
         }
 
+        // Writes the whole card back to the event that is already on the map as
+        // one undoable command, then hands off to the enterprise setup offer.
+        if (action.applyStructure) {
+          const button = createActionButton(action.label, function (button) {
+            const admin = window.ArcticEventAdmin;
+            const edits = readStructureEdits(button.closest('.ai-response'));
+            const siblings = button.parentElement ? button.parentElement.querySelectorAll('button') : [];
+            siblings.forEach(function (other) { other.disabled = true; });
+
+            if (!admin || typeof admin.applyEventEdit !== 'function' || !edits) {
+              offerEnterpriseSetup();
+              return;
+            }
+
+            const result = admin.applyEventEdit({ type: 'apply-structure', value: edits });
+            const changes = Array.isArray(result.changes) ? result.changes : [];
+            appendAiMessage({
+              intro: result.message,
+              heading: changes.length ? (changes.length === 1 ? 'Change applied' : 'Changes applied') : '',
+              details: changes,
+              actions: result.undoable ? [{ label: 'Undo', undoEdit: true }] : []
+            }, offerEnterpriseSetup);
+          });
+          (structurePreview ? structureActionsRow : actionsRow).appendChild(button);
+          return;
+        }
+
         if (action.buildPlan) {
           const button = createActionButton(action.label, function (button) {
             const cardEdits = readStructureEdits(button.closest('.ai-response'));
@@ -1236,7 +1387,7 @@
               : cardEdits;
             openEventWorkspace({ plan: action.buildPlan, planEdits: edits, skipConfirm: true, viewMode: 'map' });
             button.disabled = true;
-            offerEnterpriseSetup();
+            offerRefine();
           });
           (structurePreview ? structureActionsRow : actionsRow).appendChild(button);
           return;
@@ -1254,11 +1405,15 @@
         }
 
         if (action.dismiss) {
-          actionsRow.appendChild(createActionButton(action.label, function (button) {
+          const button = createActionButton(action.label, function (button) {
             button.disabled = true;
             const siblings = button.parentElement ? button.parentElement.querySelectorAll('button') : [];
             siblings.forEach(function (other) { other.disabled = true; });
-          }));
+            // Declining a card is still an answer, so a card can name what the
+            // agent should do next instead of leaving the turn dead.
+            if (typeof action.then === 'function') action.then();
+          });
+          (structurePreview ? structureActionsRow : actionsRow).appendChild(button);
           return;
         }
 
@@ -1270,6 +1425,19 @@
             }
             button.disabled = true;
             if (typeof action.enterprise.next === 'function') action.enterprise.next();
+          }));
+          return;
+        }
+
+        // Publishes when the checklist is clean and opens the review when it
+        // is not, so the agent can offer this the moment it believes the event
+        // is ready without having to be right. Unlike the cards that resolve a
+        // question once, this button stays live: closing the review to go fix
+        // something has to leave a way back.
+        if (action.publish) {
+          actionsRow.appendChild(createActionButton(action.label, function () {
+            const admin = window.ArcticEventAdmin;
+            if (admin && typeof admin.publish === 'function') admin.publish();
           }));
           return;
         }
@@ -1298,7 +1466,7 @@
           actionsRow.appendChild(createActionButton(action.label, function (button) {
             openEventWorkspace({ generatedDraft: action.generatedDraft, skipConfirm: true, viewMode: 'map' });
             button.disabled = true;
-            offerEnterpriseSetup();
+            offerRefine();
           }));
           return;
         }
@@ -1360,9 +1528,74 @@
     setMessagesBottomClearance(true);
     updateMessagesTopSpacing();
 
+    if (input) input.dataset.placeholder = DEFAULT_CHAT_PLACEHOLDER;
     if (chatTitleContent) {
       chatTitleContent.textContent = DEFAULT_CHAT_TITLE;
     }
+  }
+
+  // Discarding the draft from the editor also clears the conversation, since
+  // every turn in it is about the event that no longer exists.
+  window.resetChatConversation = resetChat;
+
+  function clearPromptStarters() {
+    const existing = messagesArea.querySelector('.chat-prompt-starters');
+    if (existing) existing.remove();
+  }
+
+  // Empty-state for the AI event path: the composer alone does not tell anyone
+  // what a good description looks like, so seed the same examples the cold
+  // start uses and let a click submit them outright.
+  function showEventPromptStarters() {
+    clearPromptStarters();
+
+    const block = document.createElement('div');
+    block.className = 'chat-prompt-starters';
+
+    const lede = document.createElement('p');
+    lede.className = 'chat-prompt-starters-lede';
+    lede.textContent = 'Tell me what you\u2019re running in plain words and I\u2019ll draft the event and all of its sessions together. Try one of these:';
+    block.appendChild(lede);
+
+    const chips = document.createElement('div');
+    chips.className = 'chat-prompt-starter-chips';
+    EVENT_PROMPT_EXAMPLES.forEach(function (example) {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'event-ai-chip chat-prompt-starter-chip';
+      chip.textContent = example.label;
+      chip.title = example.prompt;
+      chip.addEventListener('click', function () {
+        submitMessage(example.prompt);
+      });
+      chips.appendChild(chip);
+    });
+    block.appendChild(chips);
+
+    messagesArea.appendChild(block);
+  }
+
+  // The switcher's "Create with AI" is the named entry point for the product's
+  // core bet, so it has to land in a chat that is already set up to receive a
+  // description rather than just focusing an empty box.
+  function startEventChat() {
+    if (isEditingTitle) {
+      finishTitleEdit(true);
+    }
+
+    setView('chat');
+    resetChat();
+
+    if (chatTitleContent) {
+      chatTitleContent.textContent = EVENT_CHAT_TITLE;
+    }
+    if (input) {
+      input.dataset.placeholder = EVENT_CHAT_PLACEHOLDER;
+    }
+
+    showEventPromptStarters();
+    scrollToBottom();
+    if (input) input.focus();
   }
 
   function loadDemoChat(chatId, options) {
@@ -1390,7 +1623,12 @@
       // revealed cards) so a proactive card feels like a real agent turn.
       // Prior turns and non-streamed entry points render instantly.
       if (opts.stream && index === lastIndex) {
-        appendAiMessage(message, opts.onStreamComplete);
+        // When the caller performs the card's action itself (auto-reveal), the
+        // buttons would only offer to redo it, so they are dropped.
+        appendAiMessage(
+          opts.autoBuild ? Object.assign({}, message, { actions: [] }) : message,
+          opts.onStreamComplete
+        );
         return;
       }
 
@@ -1461,6 +1699,11 @@
       workspacePanel.classList.remove('is-event-workspace-active');
     }
 
+    // Toasts are anchored to the workspace and talk about it, so leaving one
+    // behind on Home would be commentary on a surface that is no longer there.
+    const admin = window.ArcticEventAdmin;
+    if (admin && typeof admin.clearToast === 'function') admin.clearToast();
+
     if (!opts.preserveView) {
       setView('chat');
     }
@@ -1500,7 +1743,8 @@
 
   function openEventOverview(summary) {
     if (!workspaceEventOverviewView) return;
-    renderEventOverview(summary);
+    if (summary) eventOverviewSummary = summary;
+    setEventOverviewMode('manage');
 
     if (workspaceDefaultView) {
       workspaceDefaultView.classList.add('is-hidden');
@@ -1514,7 +1758,6 @@
     workspaceEventOverviewView.setAttribute('aria-hidden', 'false');
     if (workspacePanel) workspacePanel.classList.add('is-event-workspace-active');
 
-    setEventOverviewMode('manage');
     setView('chat');
   }
 
@@ -1664,10 +1907,15 @@
     const wrap = el('div', 'event-cover-map');
     wrap.setAttribute('aria-hidden', 'true');
 
+    // The map, arcs, and markers all live inside this frame, which holds the
+    // map's true aspect ratio so nothing is stretched and the dots stay on
+    // their continents at any banner width.
+    const frame = el('div', 'event-cover-worldmap');
+
     const worldImg = el('img', 'event-cover-worldmap-img');
     worldImg.src = 'assets/world-map.svg';
     worldImg.alt = '';
-    wrap.appendChild(worldImg);
+    frame.appendChild(worldImg);
 
     const svg = document.createElementNS(NS, 'svg');
     svg.setAttribute('class', 'event-cover-orbit');
@@ -1689,7 +1937,7 @@
       link.setAttribute('d', d);
       svg.appendChild(link);
     }
-    wrap.appendChild(svg);
+    frame.appendChild(svg);
 
     const nodes = el('div', 'event-cover-nodes');
     regions.forEach(function (region, index) {
@@ -1702,7 +1950,8 @@
       marker.appendChild(el('span', 'event-cover-tick', region.label));
       nodes.appendChild(marker);
     });
-    wrap.appendChild(nodes);
+    frame.appendChild(nodes);
+    wrap.appendChild(frame);
     return wrap;
   }
 
@@ -1714,13 +1963,15 @@
     cover.style.setProperty('--cover-h', String(opts.hue));
     cover.appendChild(buildCoverMap(opts.regions));
 
-    const edit = el('button', 'event-cover-edit');
-    edit.type = 'button';
-    edit.title = 'Edit in editor';
-    edit.setAttribute('aria-label', 'Edit event in editor');
-    edit.appendChild(overviewIcon('pencil'));
-    edit.addEventListener('click', closeEventOverview);
-    cover.appendChild(edit);
+    if (opts.editable) {
+      const edit = el('button', 'event-cover-edit');
+      edit.type = 'button';
+      edit.title = 'Edit in editor';
+      edit.setAttribute('aria-label', 'Edit event in editor');
+      edit.appendChild(overviewIcon('pencil'));
+      edit.addEventListener('click', closeEventOverview);
+      cover.appendChild(edit);
+    }
 
     return cover;
   }
@@ -1732,10 +1983,9 @@
     return row;
   }
 
-  function renderEventOverview(summary) {
-    if (!eventOverviewRoot) return;
-    eventOverviewRoot.innerHTML = '';
-
+  // Manage and View are two audiences reading the same event, so they share
+  // one derived model and diverge only in what they are allowed to show.
+  function collectOverviewModel(summary) {
     const info = summary || {};
     const admin = window.ArcticEventAdmin || {};
     const context = typeof admin.getEventContext === 'function' ? admin.getEventContext() : null;
@@ -1746,57 +1996,139 @@
     const title = (context && context.eventTitle) || info.title || 'Untitled event';
     const spot = (context && context.eventSpot) || '';
     const sessions = (context && context.sessions) || [];
-    const sessionCount = program ? program.sessionCount : (info.sessionCount || sessions.length);
-    const instructorCount = program ? program.instructorCount : (info.instructorCount || 0);
-    const instructorNames = (program && program.instructorNames) || [];
-    const registrationLabel = (program && program.registrationLabel) || 'Not set';
-    const registrationModes = (context && context.registrationModes) || [];
     const regions = collectRegions(sessions);
-    const regionLabels = regions.map(function (region) { return region.label; });
-    const dateRange = formatDateRange(sessions, info.whenText);
-    const hue = overviewHue(title + '|' + spot);
 
-    // Toolbar heading carries the event title; the breadcrumb echoes the Spot,
-    // the record type, and (once live) the publish time.
+    return {
+      info: info,
+      sync: sync,
+      title: title,
+      spot: spot,
+      sessions: sessions,
+      sessionCount: program ? program.sessionCount : (info.sessionCount || sessions.length),
+      instructorCount: program ? program.instructorCount : (info.instructorCount || 0),
+      instructorNames: (program && program.instructorNames) || [],
+      registrationLabel: (program && program.registrationLabel) || 'Not set',
+      registrationModes: (context && context.registrationModes) || [],
+      regions: regions,
+      regionLabels: regions.map(function (region) { return region.label; }),
+      dateRange: formatDateRange(sessions, info.whenText),
+      hue: overviewHue(title + '|' + spot)
+    };
+  }
+
+  // Toolbar heading carries the event title. The breadcrumb is admin wayfinding
+  // (Spot, record type, publish time), so View mode gets the plain event line
+  // instead of the record's place in the admin hierarchy.
+  function renderOverviewToolbar(model, isViewMode) {
     const heading = document.getElementById('event-overview-heading');
-    if (heading) heading.textContent = title;
+    if (heading) heading.textContent = model.title;
 
     const breadcrumb = document.getElementById('event-overview-breadcrumb');
-    if (breadcrumb) {
-      breadcrumb.innerHTML = '';
-      const crumbs = [];
-      if (spot) {
+    if (!breadcrumb) return;
+    breadcrumb.innerHTML = '';
+
+    const crumbs = [];
+    if (isViewMode) {
+      crumbs.push(el('span', 'event-toolbar-crumb', 'Attendee view'));
+      if (model.dateRange) crumbs.push(el('span', 'event-toolbar-crumb', model.dateRange));
+    } else {
+      if (model.spot) {
         const spotCrumb = el('span', 'event-toolbar-crumb');
-        const spotLink = el('a', 'event-toolbar-link', spot);
-        spotLink.href = '#';
-        spotLink.title = 'Preview only in this prototype';
-        spotLink.addEventListener('click', function (event) { event.preventDefault(); });
-        spotCrumb.appendChild(spotLink);
+        spotCrumb.appendChild(el('span', 'event-toolbar-link is-inert', model.spot));
         crumbs.push(spotCrumb);
       }
       const typeCrumb = el('span', 'event-toolbar-crumb');
       typeCrumb.appendChild(overviewIcon('calendar'));
       typeCrumb.appendChild(el('span', null, 'Event'));
       crumbs.push(typeCrumb);
-      if (info.publishedAt) {
-        crumbs.push(el('span', 'event-toolbar-crumb', 'Published ' + info.publishedAt));
+      if (model.info.publishedAt) {
+        crumbs.push(el('span', 'event-toolbar-crumb', 'Published ' + model.info.publishedAt));
       }
-      crumbs.forEach(function (crumb, index) {
-        if (index > 0) breadcrumb.appendChild(el('span', 'event-toolbar-sep', '\u00b7'));
-        breadcrumb.appendChild(crumb);
-      });
     }
 
+    crumbs.forEach(function (crumb, index) {
+      if (index > 0) breadcrumb.appendChild(el('span', 'event-toolbar-sep', '\u00b7'));
+      breadcrumb.appendChild(crumb);
+    });
+  }
+
+  function buildOverviewSessionCard(session, index, options) {
+    const opts = options || {};
+    const isVirtual = session.venueMode === 'virtual';
+    const card = el('li', 'event-session-card');
+
+    const thumb = el('div', 'event-session-thumb ' + (isVirtual ? 'is-virtual' : 'is-inperson'));
+    thumb.appendChild(overviewIcon(isVirtual ? 'video' : 'pin', 'event-session-thumb-icon'));
+    card.appendChild(thumb);
+
+    const body = el('div', 'event-session-body');
+    const top = el('div', 'event-session-top');
+    top.appendChild(el('span', 'event-session-index', 'Session ' + (index + 1)));
+    top.appendChild(el('span', 'event-session-tag ' + (isVirtual ? 'is-virtual' : 'is-inperson'), isVirtual ? 'Virtual' : 'In person'));
+    body.appendChild(top);
+    body.appendChild(el('h4', 'event-session-title', session.title || 'Session ' + (index + 1)));
+
+    const region = deriveRegion(session.timezone);
+    const whenParts = [];
+    if (session.date) whenParts.push(formatOverviewDate(session.date));
+    if (session.startTime) whenParts.push(session.startTime + (session.endTime ? '\u2013' + session.endTime : ''));
+    if (region && region.city) whenParts.push(region.city + ' (' + region.label + ')');
+    else if (session.timezone) whenParts.push(session.timezone);
+    if (whenParts.length) body.appendChild(buildSessionMetaRow('clock', whenParts.join(' \u00b7 ')));
+
+    const logistics = [];
+    if (session.location) logistics.push(session.location);
+    // Seat counts are a capacity-planning number, not something an attendee
+    // reading the page is being asked to act on.
+    if (opts.showCapacity && session.capacity) logistics.push(session.capacity + ' seats');
+    if (session.instructors && session.instructors.length) logistics.push(session.instructors.join(', '));
+    if (logistics.length) body.appendChild(buildSessionMetaRow(isVirtual ? 'video' : 'pin', logistics.join(' \u00b7 ')));
+
+    card.appendChild(body);
+    return card;
+  }
+
+  function buildOverviewSessionsSection(model, options) {
+    const opts = options || {};
+    const section = el('section', 'event-overview-section');
+    const head = el('div', 'event-section-head');
+    head.appendChild(el('h3', 'event-section-title', 'Sessions'));
+    if (model.sessions.length) head.appendChild(el('span', 'event-section-count', String(model.sessions.length)));
+    section.appendChild(head);
+
+    // Manage keeps the canvas order so the list reads against the map; an
+    // attendee is reading a schedule, so that one runs in date order.
+    const sessions = opts.chronological
+      ? model.sessions.slice().sort(function (a, b) {
+        return String(a.date || '').localeCompare(String(b.date || ''))
+          || String(a.startTime || '').localeCompare(String(b.startTime || ''));
+      })
+      : model.sessions;
+
+    const list = el('ul', 'event-sessions');
+    sessions.forEach(function (session, index) {
+      list.appendChild(buildOverviewSessionCard(session, index, options));
+    });
+    section.appendChild(list);
+    return section;
+  }
+
+  function renderManageOverview(model) {
     // Presentational section tabs (mirrors the product IA; Overview is live).
     const tabs = el('nav', 'event-overview-tabs');
     tabs.setAttribute('aria-label', 'Event sections');
     ['Overview', 'Enrolment', 'Registration & Attendance', 'Reports', 'Settings'].forEach(function (label, index) {
-      const tab = el('button', 'event-overview-tab' + (index === 0 ? ' is-active' : ''), label);
+      const isLive = index === 0;
+      const tab = el('button', 'event-overview-tab' + (isLive ? ' is-active' : ''), label);
       tab.type = 'button';
-      if (index === 0) {
+      if (isLive) {
         tab.setAttribute('aria-current', 'page');
       } else {
-        tab.title = 'Preview only in this prototype';
+        // Named but not built. Disabling says so plainly, where a tooltip on a
+        // live-looking tab only says so after someone has already clicked it.
+        tab.disabled = true;
+        tab.classList.add('is-preview-only');
+        tab.title = 'Not built in this prototype';
       }
       tabs.appendChild(tab);
     });
@@ -1804,23 +2136,22 @@
 
     // Hero: generated cover + at-a-glance details.
     const hero = el('section', 'event-overview-hero');
-
-    hero.appendChild(buildEventCover({ hue: hue, regions: regions }));
+    hero.appendChild(buildEventCover({ hue: model.hue, regions: model.regions, editable: true }));
 
     const heroInfo = el('aside', 'event-hero-info');
 
-    if (dateRange) {
+    if (model.dateRange) {
       const dateLine = el('p', 'event-hero-daterange');
       dateLine.appendChild(overviewIcon('calendar'));
-      dateLine.appendChild(el('span', null, dateRange));
+      dateLine.appendChild(el('span', null, model.dateRange));
       heroInfo.appendChild(dateLine);
     }
 
-    heroInfo.appendChild(el('h2', 'event-hero-title', title));
+    heroInfo.appendChild(el('h2', 'event-hero-title', model.title));
 
-    const chipSource = registrationModes.length
-      ? registrationModes.map(function (id) { return REGISTRATION_MODE_LABELS[id] || id; })
-      : (registrationLabel && registrationLabel !== 'Not set' ? [registrationLabel] : []);
+    const chipSource = model.registrationModes.length
+      ? model.registrationModes.map(function (id) { return REGISTRATION_MODE_LABELS[id] || id; })
+      : (model.registrationLabel && model.registrationLabel !== 'Not set' ? [model.registrationLabel] : []);
     if (chipSource.length) {
       const chips = el('ul', 'event-hero-chips');
       chipSource.forEach(function (label) {
@@ -1832,16 +2163,16 @@
     // Auto-summary in place of a free-text description: a truthful sentence
     // built from the data, so the overview never shows placeholder copy.
     const summaryParts = [];
-    if (sessionCount) {
-      summaryParts.push(sessionCount + ' session' + (sessionCount === 1 ? '' : 's')
-        + (regionLabels.length ? ' across ' + joinReadable(regionLabels) : ''));
+    if (model.sessionCount) {
+      summaryParts.push(model.sessionCount + ' session' + (model.sessionCount === 1 ? '' : 's')
+        + (model.regionLabels.length ? ' across ' + joinReadable(model.regionLabels) : ''));
     }
-    if (sync && sync.enrolled) {
-      summaryParts.push(sync.enrolled + ' learner' + (sync.enrolled === 1 ? '' : 's')
+    if (model.sync && model.sync.enrolled) {
+      summaryParts.push(model.sync.enrolled + ' learner' + (model.sync.enrolled === 1 ? '' : 's')
         + ' enrolled from Workday Learning');
     }
-    if (instructorNames.length) {
-      summaryParts.push('Led by ' + joinReadable(instructorNames));
+    if (model.instructorNames.length) {
+      summaryParts.push('Led by ' + joinReadable(model.instructorNames));
     }
     if (summaryParts.length) {
       heroInfo.appendChild(el('p', 'event-hero-summary', summaryParts.join('. ') + '.'));
@@ -1853,9 +2184,9 @@
       facts.appendChild(el('dt', 'event-hero-fact-key', key));
       facts.appendChild(el('dd', 'event-hero-fact-val', value));
     }
-    addFact('Spot', spot);
-    addFact('Starts', info.whenText || dateRange);
-    if (regionLabels.length) addFact('Regions', joinReadable(regionLabels));
+    addFact('Spot', model.spot);
+    addFact('Starts', model.info.whenText || model.dateRange);
+    if (model.regionLabels.length) addFact('Regions', joinReadable(model.regionLabels));
     if (facts.childNodes.length) heroInfo.appendChild(facts);
 
     hero.appendChild(heroInfo);
@@ -1864,11 +2195,11 @@
     // Stat strip.
     const stats = el('div', 'event-overview-stats');
     const tiles = [
-      { icon: 'calendar', label: sessionCount === 1 ? 'Session' : 'Sessions', value: String(sessionCount) },
-      { icon: 'users', label: instructorCount === 1 ? 'Instructor' : 'Instructors', value: String(instructorCount) }
+      { icon: 'calendar', label: model.sessionCount === 1 ? 'Session' : 'Sessions', value: String(model.sessionCount) },
+      { icon: 'users', label: model.instructorCount === 1 ? 'Instructor' : 'Instructors', value: String(model.instructorCount) }
     ];
-    if (sync && sync.enrolled) tiles.push({ icon: 'userCheck', label: 'Enrolled', value: String(sync.enrolled) });
-    tiles.push({ icon: 'ticket', label: 'Registration', value: registrationLabel });
+    if (model.sync && model.sync.enrolled) tiles.push({ icon: 'userCheck', label: 'Enrolled', value: String(model.sync.enrolled) });
+    tiles.push({ icon: 'ticket', label: 'Registration', value: model.registrationLabel });
     tiles.forEach(function (tile) {
       const tileEl = el('div', 'event-stat');
       tileEl.appendChild(overviewIcon(tile.icon, 'event-stat-icon'));
@@ -1880,56 +2211,85 @@
     });
     eventOverviewRoot.appendChild(stats);
 
-    // Sessions.
-    const sessionsSection = el('section', 'event-overview-section');
-    const sectionHead = el('div', 'event-section-head');
-    sectionHead.appendChild(el('h3', 'event-section-title', 'Sessions'));
-    if (sessions.length) sectionHead.appendChild(el('span', 'event-section-count', String(sessions.length)));
-    sessionsSection.appendChild(sectionHead);
+    eventOverviewRoot.appendChild(buildOverviewSessionsSection(model, { showCapacity: true }));
+  }
 
-    const list = el('ul', 'event-sessions');
-    sessions.forEach(function (session, index) {
-      const isVirtual = session.venueMode === 'virtual';
-      const card = el('li', 'event-session-card');
+  // What the people being invited would see. Not the admin page with controls
+  // hidden: no section tabs, no operational counts, no edit affordance, and a
+  // registration call to action in the place the stat strip occupied.
+  function renderAttendeeOverview(model) {
+    const hero = el('section', 'event-overview-hero');
+    hero.appendChild(buildEventCover({ hue: model.hue, regions: model.regions }));
 
-      const thumb = el('div', 'event-session-thumb ' + (isVirtual ? 'is-virtual' : 'is-inperson'));
-      thumb.appendChild(overviewIcon(isVirtual ? 'video' : 'pin', 'event-session-thumb-icon'));
-      card.appendChild(thumb);
+    const heroInfo = el('aside', 'event-hero-info');
 
-      const body = el('div', 'event-session-body');
-      const top = el('div', 'event-session-top');
-      top.appendChild(el('span', 'event-session-index', 'Session ' + (index + 1)));
-      top.appendChild(el('span', 'event-session-tag ' + (isVirtual ? 'is-virtual' : 'is-inperson'), isVirtual ? 'Virtual' : 'In person'));
-      body.appendChild(top);
-      body.appendChild(el('h4', 'event-session-title', session.title || 'Session ' + (index + 1)));
+    if (model.dateRange) {
+      const dateLine = el('p', 'event-hero-daterange');
+      dateLine.appendChild(overviewIcon('calendar'));
+      dateLine.appendChild(el('span', null, model.dateRange));
+      heroInfo.appendChild(dateLine);
+    }
 
-      const region = deriveRegion(session.timezone);
-      const whenParts = [];
-      if (session.date) whenParts.push(formatOverviewDate(session.date));
-      if (session.startTime) whenParts.push(session.startTime + (session.endTime ? '\u2013' + session.endTime : ''));
-      if (region && region.city) whenParts.push(region.city + ' (' + region.label + ')');
-      else if (session.timezone) whenParts.push(session.timezone);
-      if (whenParts.length) body.appendChild(buildSessionMetaRow('clock', whenParts.join(' \u00b7 ')));
+    heroInfo.appendChild(el('h2', 'event-hero-title', model.title));
 
-      const logistics = [];
-      if (session.location) logistics.push(session.location);
-      if (session.capacity) logistics.push(session.capacity + ' seats');
-      if (session.instructors && session.instructors.length) logistics.push(session.instructors.join(', '));
-      if (logistics.length) body.appendChild(buildSessionMetaRow(isVirtual ? 'video' : 'pin', logistics.join(' \u00b7 ')));
+    const attendeeParts = [];
+    if (model.sessionCount) {
+      attendeeParts.push(model.sessionCount + ' session' + (model.sessionCount === 1 ? '' : 's')
+        + (model.regionLabels.length ? ' across ' + joinReadable(model.regionLabels) : ''));
+    }
+    if (model.instructorNames.length) attendeeParts.push('Led by ' + joinReadable(model.instructorNames));
+    if (attendeeParts.length) {
+      heroInfo.appendChild(el('p', 'event-hero-summary', attendeeParts.join('. ') + '.'));
+    }
 
-      card.appendChild(body);
-      list.appendChild(card);
+    const needsApproval = model.registrationModes.indexOf('approval-required') > -1;
+    const cta = el('div', 'event-attendee-cta');
+    const register = el('button', 'event-attendee-register', needsApproval ? 'Request a place' : 'Register');
+    register.type = 'button';
+    const note = el('span', 'event-attendee-cta-note', needsApproval
+      ? 'Your manager approves requests before a place is confirmed.'
+      : 'Open to everyone \u2014 your place is confirmed straight away.');
+    register.addEventListener('click', function () {
+      register.disabled = true;
+      register.textContent = needsApproval ? 'Request sent' : 'You\u2019re registered';
+      note.textContent = needsApproval
+        ? 'We\u2019ll email you once your manager responds.'
+        : 'A calendar invite is on its way.';
     });
-    sessionsSection.appendChild(list);
-    eventOverviewRoot.appendChild(sessionsSection);
+    cta.appendChild(register);
+    cta.appendChild(note);
+    heroInfo.appendChild(cta);
+
+    hero.appendChild(heroInfo);
+    eventOverviewRoot.appendChild(hero);
+
+    eventOverviewRoot.appendChild(buildOverviewSessionsSection(model, { showCapacity: false, chronological: true }));
+  }
+
+  function renderEventOverview(summary) {
+    if (!eventOverviewRoot) return;
+    if (summary) eventOverviewSummary = summary;
+
+    const model = collectOverviewModel(eventOverviewSummary);
+    const isViewMode = eventOverviewMode === 'view';
+
+    eventOverviewRoot.innerHTML = '';
+    renderOverviewToolbar(model, isViewMode);
+    if (isViewMode) renderAttendeeOverview(model);
+    else renderManageOverview(model);
   }
 
   if (eventOverviewBackButton) {
     eventOverviewBackButton.addEventListener('click', closeEventOverview);
   }
 
+  if (eventOverviewHomeButton) {
+    eventOverviewHomeButton.addEventListener('click', function () { goHome(); });
+  }
+
   function setEventOverviewMode(mode) {
     const isView = mode === 'view';
+    eventOverviewMode = isView ? 'view' : 'manage';
     if (workspaceEventOverviewView) workspaceEventOverviewView.classList.toggle('is-view-mode', isView);
     if (eventOverviewManageButton) {
       eventOverviewManageButton.classList.toggle('is-active', !isView);
@@ -1939,6 +2299,7 @@
       eventOverviewViewButton.classList.toggle('is-active', isView);
       eventOverviewViewButton[(isView ? 'setAttribute' : 'removeAttribute')]('aria-current', 'true');
     }
+    renderEventOverview();
   }
 
   if (eventOverviewManageButton) {
@@ -2045,10 +2406,11 @@
     });
   }
 
-  // Loose gate so event descriptions route to the generator while ordinary
-  // questions still get the generic assistant reply.
+  // Requires an actual event noun. Bare verbs like "create" and "schedule" used
+  // to qualify on their own, which sent ordinary requests ("create a summary")
+  // into the event generator; the generic reply handles those instead.
   function looksLikeEventPrompt(text) {
-    return /\b(event|session|sessions|onboarding|training|kickoff|kick-off|workshop|webinar|certification|summit|bootcamp|course|program|programme|offsite|off-site|conference|seminar|enablement|schedule|create)\b/i.test(text);
+    return /\b(event|session|sessions|onboarding|training|kickoff|kick-off|workshop|webinar|certification|summit|bootcamp|course|series|program|programme|offsite|off-site|conference|seminar|enablement)\b/i.test(text);
   }
 
   // Turns a typed description into a narrate-then-reveal turn: the AI summarizes
@@ -2073,22 +2435,19 @@
     const count = Math.max(1, parseInt(params.sessionCount, 10) || 1);
 
     const response = {
-      intro: 'I drafted "' + title + '" and I am opening it on the canvas now. Tweak anything from there, or just tell me what to change.',
+      intro: 'I drafted "' + title + '" and I am opening it on the canvas now.',
       heading: 'Program drafted',
       details: [
-        'Want me to finish setup? I\'ll enroll the audience and size each session to headcount, confirm times against calendars, and reserve rooms + Zoom in one pass.'
+        'Everything is born together \u2014 the event and all ' + count + ' session' + (count === 1 ? '' : 's') + ' \u2014 so you are correcting a draft rather than filling in a form.'
       ],
-      generatedCard: { title: title, sessionCount: count },
-      actions: [
-        { label: 'Finish setup', enterpriseSetup: true },
-        { label: 'Not now', dismiss: true }
-      ]
+      generatedCard: { title: title, sessionCount: count }
     };
 
     return {
       response: response,
       open: function () {
         openEventWorkspace({ generatedDraft: draft, skipConfirm: true, viewMode: 'map' });
+        offerRefine();
       }
     };
   }
@@ -2234,6 +2593,7 @@
     // placeholder once a message is on its way so the next empty state is neutral.
     if (input) input.dataset.placeholder = DEFAULT_CHAT_PLACEHOLDER;
 
+    clearPromptStarters();
     messagesArea.appendChild(createUserBubble(text));
 
     const editResult = maybeHandleEventEdit(text);
@@ -2320,11 +2680,11 @@
   function registerCanvasNodeRouting() {
     const admin = window.ArcticEventAdmin;
     if (!admin || typeof admin.setNodeFocusHandler !== 'function') return;
-    // When the human builds from the proposal review, offer to finish the
-    // enterprise setup on the freshly mapped event. The build click is itself the
-    // "user acted" signal, so the offer appears immediately.
+    // The workspace cold start reveals on the map without going through chat,
+    // so this hook is what brings the conversation back in: the refine card
+    // summarizes what was built, and setup follows once the human answers it.
     if (typeof admin.setEventBuiltHandler === 'function') {
-      admin.setEventBuiltHandler(function () { offerEnterpriseSetup(); });
+      admin.setEventBuiltHandler(function () { offerRefine(); });
     }
     // Publishing keeps the canvas open and hands the moment to the conversation:
     // a concise recap turn with an "Open event" action into the Event Overview.
@@ -2468,6 +2828,10 @@
         finishTitleEdit(true);
       }
 
+      // A new conversation should mean a clean workspace too: leaving the event
+      // editor open behind an empty chat is how a second demo run starts from
+      // someone else's draft.
+      closeEventWorkspace();
       setView('chat');
       resetChat();
       input.focus();
@@ -2545,9 +2909,7 @@
   if (eventsAiButton) {
     eventsAiButton.addEventListener('click', function () {
       closePageSwitcher();
-      setView('home');
-      const composer = document.getElementById('home-prompt-input');
-      if (composer) composer.focus();
+      startEventChat();
     });
   }
 
@@ -2558,11 +2920,14 @@
       }
 
       // Narrate first, then auto-open the drafted program on the canvas so the
-      // reveal animation is the payoff rather than a form click-through.
+      // reveal animation is the payoff rather than a form click-through. The
+      // refine card follows the reveal so the map is what gets corrected.
       loadDemoChat('methodology-rollout', {
         stream: true,
+        autoBuild: true,
         onStreamComplete: function () {
           openEventWorkspace({ plan: 'methodology-rollout', skipConfirm: true, viewMode: 'map' });
+          offerRefine();
         }
       });
     });

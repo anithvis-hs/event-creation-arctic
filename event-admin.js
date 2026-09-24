@@ -22,7 +22,10 @@
   const CANVAS_MAX_ZOOM = 1.6;
   // Below roughly this scale the node titles and summaries stop being readable,
   // so intro framing never zooms out past it.
-  const CANVAS_INTRO_MIN_ZOOM = 0.7;
+  // Floor for the reveal only, so a wide session fan still lands whole in the
+  // frame. Node titles stay legible at this scale and the inspector carries
+  // the detail anyway.
+  const CANVAS_INTRO_MIN_ZOOM = 0.62;
   const STATUS = {
     NOT_STARTED: 'Not started',
     IN_PROGRESS: 'In progress',
@@ -161,11 +164,9 @@
     openButton: document.getElementById('new-event-button'),
     sampleButton: document.getElementById('load-sample-event-button'),
     workspaceSaveButton: document.getElementById('workspace-save-button'),
-    workspaceReviewButton: document.getElementById('workspace-review-button'),
     workspacePublishButton: document.getElementById('workspace-publish-button'),
     closeButton: document.getElementById('event-admin-close-button'),
     saveButton: document.getElementById('event-admin-save-button'),
-    reviewButton: document.getElementById('event-admin-review-button'),
     publishButton: document.getElementById('event-admin-publish-button'),
     startBlankButton: document.getElementById('event-start-blank-button'),
     adminPanel: document.querySelector('.event-admin-panel'),
@@ -197,10 +198,10 @@
     alert: document.getElementById('event-admin-alert'),
     zoomInButton: document.getElementById('event-canvas-zoom-in'),
     zoomOutButton: document.getElementById('event-canvas-zoom-out'),
-    zoomResetButton: document.getElementById('event-canvas-zoom-reset'),
     zoomLabel: document.getElementById('event-canvas-zoom-label'),
     fitGraphButton: document.getElementById('event-canvas-fit-graph'),
-    viewToggle: document.getElementById('event-view-toggle'),
+    viewMapButton: document.getElementById('event-view-map'),
+    viewOutlineButton: document.getElementById('event-view-outline'),
     zoomCluster: document.getElementById('event-canvas-zoom-cluster'),
     canvasHeading: document.getElementById('event-canvas-heading'),
     publishReviewModal: document.getElementById('event-publish-review-modal'),
@@ -1257,6 +1258,7 @@
     // on-screen size, the way canvas tools keep their controls legible.
     viewport.style.setProperty('--canvas-zoom', String(state.canvasView.scale));
     updateCanvasZoomLabel();
+    updateZoomClusterVisibility();
   }
 
   function getCanvasContainerPoint(clientX, clientY) {
@@ -1293,27 +1295,44 @@
     applyCanvasTransform();
   }
 
+  // The layout box is wider and taller than the nodes it holds: it is sized
+  // from a centre line plus padding, so framing against it leaves the map
+  // shrunk and pushed off to one side. Framing against the nodes themselves is
+  // what makes the graph land centred and filling the frame.
+  function getGraphContentBounds() {
+    const entries = state.layout && state.layout.entries;
+    if (!entries || !entries.length) return null;
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    entries.forEach(function (entry) {
+      minX = Math.min(minX, entry.x);
+      minY = Math.min(minY, entry.y);
+      maxX = Math.max(maxX, entry.x + entry.width);
+      maxY = Math.max(maxY, entryBottom(entry));
+    });
+    if (minX === Infinity) return null;
+
+    return { minX: minX, minY: minY, width: maxX - minX, height: maxY - minY };
+  }
+
   function fitCanvasToGraph() {
-    if (!state.draft || !state.layout) return;
-    const padding = 32;
-    const graphWidth = state.layout.width;
-    const graphHeight = state.layout.height;
+    const bounds = getGraphContentBounds();
+    if (!state.draft || !bounds) return;
+    const padding = 24;
     const viewWidth = Math.max(1, DOM.canvas.clientWidth);
     const viewHeight = Math.max(1, DOM.canvas.clientHeight);
-    const scaleX = (viewWidth - (padding * 2)) / graphWidth;
-    const scaleY = (viewHeight - (padding * 2)) / graphHeight;
+    const scaleX = (viewWidth - (padding * 2)) / bounds.width;
+    const scaleY = (viewHeight - (padding * 2)) / bounds.height;
     const scale = Math.max(CANVAS_MIN_ZOOM, Math.min(CANVAS_MAX_ZOOM, Math.min(scaleX, scaleY, 1)));
     state.canvasView.scale = scale;
-    state.canvasView.panX = Math.max(0, (viewWidth - (graphWidth * scale)) / 2);
-    state.canvasView.panY = 0;
+    state.canvasView.panX = ((viewWidth - (bounds.width * scale)) / 2) - (bounds.minX * scale);
+    state.canvasView.panY = ((viewHeight - (bounds.height * scale)) / 2) - (bounds.minY * scale);
     applyCanvasTransform();
   }
 
-  // Framing used right after an assistant build. Fitting the whole graph drops
-  // below the point where node labels and status chips can be read, and the
-  // information here is horizontal anyway: parallel branches side by side. So
-  // fit the width, keep the scale legible, and let branch depth run off the
-  // bottom as an invitation to scroll.
   // A freshly built event reveals on the map so the admin sees the whole shape
   // at once (the wow of "the AI built this"); narrow screens fall back to the
   // outline, which the toggle still reaches. Callers set this before renderAll
@@ -1324,15 +1343,35 @@
     state.viewMode = narrow ? 'outline' : 'map';
   }
 
-  function frameGraphForIntro() {
-    if (!state.draft || !state.layout) return;
-    const padding = 32;
-    const graphWidth = state.layout.width;
-    const viewWidth = Math.max(1, DOM.canvas.clientWidth);
-    const scale = Math.max(CANVAS_INTRO_MIN_ZOOM, Math.min(1, (viewWidth - (padding * 2)) / graphWidth));
+  // Framing used right after an assistant build. The whole event should land in
+  // frame so the reveal reads as "here is the shape", with a legibility floor
+  // so a large program is allowed to run off the bottom rather than shrink to
+  // unreadable; that is the case where the zoom controls appear.
+  function frameGraphForIntro(retriesLeft) {
+    const bounds = getGraphContentBounds();
+    if (!state.draft || !bounds || !DOM.canvas) return;
+    const padding = 24;
+    const viewWidth = DOM.canvas.clientWidth;
+    const viewHeight = DOM.canvas.clientHeight;
+
+    // The workspace is usually revealed in the same tick as the build, so the
+    // canvas can still measure zero here. Framing against that collapses to
+    // the minimum zoom and leaves the map clipped, so wait for a real box.
+    if (viewWidth < 2 || viewHeight < 2) {
+      const remaining = typeof retriesLeft === 'number' ? retriesLeft : 10;
+      if (remaining > 0) {
+        window.requestAnimationFrame(function () { frameGraphForIntro(remaining - 1); });
+      }
+      return;
+    }
+
+    const scaleX = (viewWidth - (padding * 2)) / bounds.width;
+    const scaleY = (viewHeight - (padding * 2)) / bounds.height;
+    const scale = Math.max(CANVAS_INTRO_MIN_ZOOM, Math.min(1, scaleX, scaleY));
     state.canvasView.scale = scale;
-    state.canvasView.panX = Math.max(0, (viewWidth - (graphWidth * scale)) / 2);
-    state.canvasView.panY = 0;
+    state.canvasView.panX = ((viewWidth - (bounds.width * scale)) / 2) - (bounds.minX * scale);
+    state.canvasView.panY = Math.max(padding, (viewHeight - (bounds.height * scale)) / 2)
+      - (bounds.minY * scale);
     applyCanvasTransform();
   }
 
@@ -1622,6 +1661,110 @@
       const name = getSessionTitle(cmd.sessionId);
       duplicateSession(cmd.sessionId);
       return { ok: true, message: `Duplicated "${name}".` };
+    }
+
+    // Batch edit from the chat refine card. Rows carry the session id they were
+    // rendered from; a row without one is an addition, and an id that no longer
+    // appears is a removal. One command so the whole card is a single undo.
+    if (cmd.type === 'apply-structure') {
+      const edits = cmd.value || {};
+      const changes = [];
+
+      const basicsTitle = cleanText(edits.basics && edits.basics.title);
+      if (basicsTitle) {
+        const basicsId = findSingletonNodeId(state.draft, NODE_TYPES.BASICS);
+        if (basicsId) {
+          const basicsPayload = state.draft.payloadByNodeId[basicsId]
+            || (state.draft.payloadByNodeId[basicsId] = {});
+          if (cleanText(basicsPayload.title) !== basicsTitle) {
+            changes.push(`Event name -> "${basicsTitle}"`);
+            basicsPayload.title = basicsTitle;
+          }
+        }
+      }
+
+      const registration = edits.registration;
+      if (registration && registration.path) {
+        const regId = findSingletonNodeId(state.draft, NODE_TYPES.REGISTRATION);
+        if (regId) {
+          const regPayload = state.draft.payloadByNodeId[regId]
+            || (state.draft.payloadByNodeId[regId] = {});
+          const nextModes = [registration.path];
+          if (registration.attendance) nextModes.push('attendance-tracked');
+          if ((regPayload.modes || []).join('|') !== nextModes.join('|')) {
+            changes.push('Registration -> ' + (registration.path === 'approval-required' ? 'approval required' : 'open')
+              + (registration.attendance ? ', attendance tracked' : ''));
+            regPayload.modes = nextModes;
+          }
+        }
+      }
+
+      // The session rows are a full replacement set, so anything absent from
+      // them is a deletion. That only holds when rows were actually sent: an
+      // edit that omits the list entirely means "leave the sessions alone".
+      const hasSessionRows = Array.isArray(edits.sessions);
+      const rows = hasSessionRows ? edits.sessions : [];
+      if (hasSessionRows) {
+        const keptIds = rows.map(function (row) { return row.id; }).filter(Boolean);
+        sessions.slice().forEach(function (sessionId) {
+          if (keptIds.indexOf(sessionId) > -1) return;
+          changes.push(`Removed "${getSessionTitle(sessionId)}"`);
+          removeNode(sessionId);
+        });
+      }
+
+      rows.forEach(function (row) {
+        let sessionId = row.id && (state.draft.sessions || []).indexOf(row.id) > -1 ? row.id : null;
+        if (!sessionId) {
+          sessionId = addNodeByType(state.draft, NODE_TYPES.SESSION, false);
+          if (!sessionId) return;
+          changes.push(`Added "${cleanText(row.name) || 'New session'}"`);
+        }
+
+        const name = cleanText(row.name);
+        if (name && name !== getSessionTitle(sessionId)) {
+          if (row.id) changes.push(`${sessionLabel(sessionId)} -> "${name}"`);
+          setSessionTitle(state.draft, sessionId, name);
+        }
+
+        const capacity = cleanText(row.capacity);
+        if (capacity && /^\d+$/.test(capacity)) {
+          const beforeCapacity = cleanText(getSessionChildPayload(state.draft, sessionId, NODE_TYPES.SESSION_CAPACITY).capacity);
+          if (beforeCapacity !== capacity) {
+            if (row.id) changes.push(`${sessionLabel(sessionId)} seats ${beforeCapacity || '—'} -> ${capacity}`);
+            setSessionChildData(sessionId, NODE_TYPES.SESSION_CAPACITY, { capacity: capacity });
+          }
+        }
+
+        const schedulePatch = {};
+        const date = cleanText(row.date);
+        const timezone = cleanText(row.timezone);
+        const beforeSchedule = getSessionSchedulePayload(sessionId);
+        if (date && date !== beforeSchedule.date) {
+          schedulePatch.date = date;
+          if (row.id) changes.push(`${sessionLabel(sessionId)} date ${beforeSchedule.date || '—'} -> ${date}`);
+        }
+        if (timezone && timezone !== beforeSchedule.timezone) {
+          schedulePatch.timezone = timezone;
+        }
+        if (Object.keys(schedulePatch).length) {
+          setSessionChildData(sessionId, NODE_TYPES.SESSION_SCHEDULE, schedulePatch);
+        }
+      });
+
+      if (!changes.length) {
+        return { ok: false, message: 'Nothing changed \u2014 that already matches the event on the map.' };
+      }
+
+      computeConflicts(state.draft);
+      markDirty();
+      updateColdStartVisibility();
+      renderAll();
+      return {
+        ok: true,
+        message: `Applied ${changes.length} change${changes.length === 1 ? '' : 's'} to the event.`,
+        changes: changes
+      };
     }
 
     // The attribute + bulk commands below all target one or more sessions via
@@ -2183,6 +2326,15 @@
     return 'not-started';
   }
 
+  // For the inspector lists, which stack seven or more rows in a narrow rail.
+  // Same reasoning as the canvas dot: most rows in a seeded program are done,
+  // so a pill on every one of them buries the few that are not. Silence means
+  // complete; anything with a pill is asking for something.
+  function attentionStatusPill(status, extraClass) {
+    if (status === STATUS.COMPLETE) return '';
+    return `<span class="event-status ${extraClass} ${statusClass(status)}">${escapeHtml(status)}</span>`;
+  }
+
   function renderPalette() {
     DOM.palette.innerHTML = paletteItems.map(function (item) {
       const isUsed = SINGLETON_TYPES.indexOf(item.type) > -1 && Boolean(findSingletonNodeId(state.draft, item.type));
@@ -2548,14 +2700,44 @@
 
   function updateViewToggle() {
     const isMap = state.viewMode === 'map';
-    if (DOM.viewToggle) {
-      DOM.viewToggle.textContent = isMap ? 'Outline view' : 'Map view';
-      DOM.viewToggle.setAttribute('aria-pressed', isMap ? 'true' : 'false');
-    }
-    if (DOM.zoomCluster) DOM.zoomCluster.classList.toggle('is-hidden', !isMap);
+    [
+      { button: DOM.viewMapButton, active: isMap },
+      { button: DOM.viewOutlineButton, active: !isMap }
+    ].forEach(function (entry) {
+      if (!entry.button) return;
+      entry.button.classList.toggle('is-active', entry.active);
+      entry.button.setAttribute('aria-pressed', entry.active ? 'true' : 'false');
+    });
+    updateZoomClusterVisibility();
     if (DOM.canvasHeading) DOM.canvasHeading.textContent = isMap ? 'Map' : 'Outline';
     if (DOM.canvas) DOM.canvas.classList.toggle('is-map-view', isMap);
     if (DOM.adminPanel) DOM.adminPanel.classList.toggle('is-map-view', isMap);
+  }
+
+  // The hero event is 1-3 sessions and always fits, so zoom and fit are noise
+  // until a program actually outgrows the frame. The test is whether a node is
+  // really clipped, not whether the layout box is larger than the frame: the
+  // box carries slack the map never paints, so measuring it would show the
+  // controls on events that are plainly all visible.
+  function updateZoomClusterVisibility() {
+    if (!DOM.zoomCluster) return;
+    let overflows = false;
+    const layer = state.viewMode === 'map' && DOM.canvas
+      ? DOM.canvas.querySelector('.event-canvas-node-layer')
+      : null;
+
+    if (layer && layer.children.length) {
+      const frame = DOM.canvas.getBoundingClientRect();
+      Array.prototype.forEach.call(layer.children, function (node) {
+        if (overflows) return;
+        const rect = node.getBoundingClientRect();
+        if (!rect.width && !rect.height) return;
+        overflows = rect.left < frame.left - 1 || rect.top < frame.top - 1
+          || rect.right > frame.right + 1 || rect.bottom > frame.bottom + 1;
+      });
+    }
+
+    DOM.zoomCluster.classList.toggle('is-hidden', !overflows);
   }
 
   // One paint routine for the middle column, so every caller stays view-agnostic.
@@ -2621,20 +2803,21 @@
       DOM.statusChip.textContent = STATUS.NOT_STARTED;
     }
 
-    const template = state.draft.meta.templateId ? getTemplateById(state.draft.meta.templateId) : null;
-    const templateLabel = template ? `${template.label} template` : 'Blank canvas';
+    // Save state reads as a quiet status beside the header actions, so it is
+    // the status alone; which template seeded the draft is visible in the
+    // editor itself and was only ever noise here.
     const syncedAt = savedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    let statusLabel = `Draft saved at ${syncedAt}`;
+    let statusLabel = `Saved ${syncedAt}`;
     if (state.draft.meta.publishStatus === 'published' && state.draft.meta.publishedAt) {
       const publishedAt = new Date(state.draft.meta.publishedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      statusLabel = `Published at ${publishedAt}`;
+      statusLabel = `Published ${publishedAt}`;
     } else if (state.draft.meta.validationAttempted) {
       const checklist = state.draft.publishChecklist || { blockers: [], warnings: [] };
       statusLabel = `${checklist.blockers.length} blocker(s) · ${checklist.warnings.length} warning(s)`;
     } else if (state.draft.meta.isDirty) {
       statusLabel = 'Unsaved changes';
     }
-    DOM.meta.textContent = `${templateLabel} · ${statusLabel}.`;
+    if (DOM.meta) DOM.meta.textContent = statusLabel;
     updateHeaderButtons();
     updatePublishSuccessChip();
   }
@@ -2666,10 +2849,8 @@
     if (DOM.adminPanel) DOM.adminPanel.classList.toggle('is-cold-start', isShowing);
     [
       DOM.workspaceSaveButton,
-      DOM.workspaceReviewButton,
       DOM.workspacePublishButton,
       DOM.saveButton,
-      DOM.reviewButton,
       DOM.publishButton
     ].forEach(function (button) {
       if (button) button.classList.toggle('is-hidden', isShowing);
@@ -2692,10 +2873,8 @@
     if (DOM.adminPanel) DOM.adminPanel.classList.toggle('is-proposal', isShowing);
     [
       DOM.workspaceSaveButton,
-      DOM.workspaceReviewButton,
       DOM.workspacePublishButton,
       DOM.saveButton,
-      DOM.reviewButton,
       DOM.publishButton
     ].forEach(function (button) {
       if (button) button.classList.toggle('is-hidden', isShowing);
@@ -2811,13 +2990,21 @@
     return true;
   }
 
-  function buildFromProposal() {
-    syncProposalFromForm();
-    const result = buildDraftFromParams(state.proposalParams);
+  // Reveal-first: a description maps out immediately instead of stopping at a
+  // review form, so the drawn structure is what the admin refines against. The
+  // onEventBuilt hand-off is what lets chat post the refine card.
+  function buildAndRevealFromParams(params) {
+    const result = buildDraftFromParams(normalizeProposalParams(params));
     state.proposalParams = null;
     setProposalMode(false);
-    loadGeneratedDraft(result.draft, { skipConfirm: true });
-    if (typeof state.onEventBuilt === 'function') state.onEventBuilt();
+    const loaded = loadGeneratedDraft(result.draft, { skipConfirm: true });
+    if (loaded && typeof state.onEventBuilt === 'function') state.onEventBuilt();
+    return loaded;
+  }
+
+  function buildFromProposal() {
+    syncProposalFromForm();
+    buildAndRevealFromParams(state.proposalParams);
   }
 
   function backFromProposal() {
@@ -3244,22 +3431,22 @@
     // The event no longer declares who teaches, so it reports what the sessions
     // decided.
     const teaching = getProgramInstructors(state.draft);
-    const inheritanceRollup = sessionIds.length
-      ? `<div class="event-field">
-          <span class="event-inline-label">Across this event</span>
-          <p class="event-helper">Registration: ${escapeHtml(eventRegistration.label || 'not set')} — ${sessionIds.length - overrides.length} of ${sessionIds.length} inherit${sessionIds.length - overrides.length === 1 ? 's' : ''}${overrides.length ? `, ${overrides.length} override${overrides.length === 1 ? 's' : ''}` : ''}.</p>
-          <p class="event-helper">Teaching: ${teaching.length ? escapeHtml(teaching.map(function (person) { return person.name; }).join(', ')) : 'nobody assigned yet'}.</p>
-        </div>`
+    // Three facts that used to be three prose blocks. As label and value they
+    // survive a 240px rail and stop pushing the sessions below the fold.
+    const summaryRows = sessionIds.length
+      ? [
+        ['Registration', `${eventRegistration.label || 'not set'} \u00b7 ${sessionIds.length - overrides.length} of ${sessionIds.length} inherit${overrides.length ? `, ${overrides.length} override${overrides.length === 1 ? 's' : ''}` : ''}`],
+        ['Teaching', teaching.length ? teaching.map(function (person) { return person.name; }).join(', ') : 'nobody assigned yet'],
+        ['Audience', getAudienceSummary()]
+      ].filter(function (row) { return hasText(row[1]); }).map(function (row) {
+        return `<div class="event-summary-row"><span class="event-summary-label">${escapeHtml(row[0])}</span><span class="event-summary-value">${escapeHtml(row[1])}</span></div>`;
+      }).join('')
       : '';
     return `
-      ${inheritanceRollup}
-      ${renderAudienceField()}
-      <div class="event-field">
-        <span class="event-inline-label">Session rail</span>
-        <p class="event-helper">Add sessions from the palette, then duplicate, reorder, or remove them here.</p>
-        <div class="event-inline-actions">
-          <button type="button" class="event-mini-button" data-action="jump-incomplete-session">Jump to incomplete</button>
-        </div>
+      ${summaryRows ? `<div class="event-field"><span class="event-inline-label">Across this event</span><div class="event-summary-list">${summaryRows}</div></div>` : ''}
+      <div class="event-field event-sessions-heading">
+        <span class="event-inline-label">Sessions${sessionIds.length ? ` (${sessionIds.length})` : ''}</span>
+        <button type="button" class="event-mini-button" data-action="jump-incomplete-session">Jump to incomplete</button>
       </div>
       <div class="event-sessions-list">
         ${(payload.sessionIds || []).map(function (sessionId, index) {
@@ -3271,7 +3458,28 @@
             schedule.startTime && schedule.endTime ? `${schedule.startTime}-${schedule.endTime}` : 'Time TBD',
             venue.venueMode || 'Venue TBD'
           ];
-          return `<div class="event-session-item"><input class="event-session-title-input" data-session-id="${sessionId}" data-action="update-session-title" value="${escapeHtml(sessionPayload.title || '')}" /><span class="event-helper">${escapeHtml(metaParts.join(' · '))}</span><button type="button" class="event-mini-button" data-action="focus-session" data-session-id="${sessionId}">Open</button><button type="button" class="event-mini-button" data-action="duplicate-session" data-session-id="${sessionId}">Duplicate</button><button type="button" class="event-mini-button" data-action="reorder-session-up" data-session-id="${sessionId}" ${index === 0 ? 'disabled' : ''}>Up</button><button type="button" class="event-mini-button" data-action="reorder-session-down" data-session-id="${sessionId}" ${index === payload.sessionIds.length - 1 ? 'disabled' : ''}>Down</button><button type="button" class="event-mini-button" data-action="remove-node" data-node-id="${sessionId}">Remove</button></div>`;
+          const title = cleanText(sessionPayload.title) || 'Untitled session';
+          const status = sessionHeadStatus(sessionId);
+          // The row itself opens the session, the way the glance and outline
+          // rows do. Reorder, duplicate and remove are rare enough to sit
+          // behind one menu instead of four buttons wrapping in a narrow rail.
+          // tabindex -1 because the toggle is the single tab stop; once the menu
+          // is open the arrow keys move between the items.
+          const menuItems = [
+            `<button type="button" role="menuitem" tabindex="-1" class="workspace-overflow-item" data-action="reorder-session-up" data-session-id="${sessionId}" ${index === 0 ? 'disabled' : ''}>Move up</button>`,
+            `<button type="button" role="menuitem" tabindex="-1" class="workspace-overflow-item" data-action="reorder-session-down" data-session-id="${sessionId}" ${index === payload.sessionIds.length - 1 ? 'disabled' : ''}>Move down</button>`,
+            `<button type="button" role="menuitem" tabindex="-1" class="workspace-overflow-item" data-action="duplicate-session" data-session-id="${sessionId}">Duplicate</button>`,
+            `<button type="button" role="menuitem" tabindex="-1" class="workspace-overflow-item" data-action="remove-node" data-node-id="${sessionId}">Remove</button>`
+          ].join('');
+          return `<div class="event-session-item" data-session-id="${sessionId}">`
+            + `<button type="button" class="event-session-open" data-action="focus-session" data-session-id="${sessionId}">`
+            + `<span class="event-session-name">${escapeHtml(title)}</span>`
+            + attentionStatusPill(status, 'event-session-status')
+            + `<span class="event-session-meta">${escapeHtml(metaParts.join(' \u00b7 '))}</span>`
+            + '</button>'
+            + `<button type="button" class="event-session-menu-toggle" data-action="toggle-session-menu" aria-haspopup="menu" aria-expanded="false" aria-label="More actions for ${escapeHtml(title)}">\u22ef</button>`
+            + `<div class="workspace-overflow-menu event-session-menu" role="menu" aria-label="Actions for ${escapeHtml(title)}" aria-hidden="true">${menuItems}</div>`
+            + '</div>';
         }).join('')}
       </div>
       ${conflicts.length ? `<div class="event-field"><span class="event-inline-label">Cross-session checks</span>${conflicts.map(function (conflict) {
@@ -3279,6 +3487,18 @@
       }).join('')}</div>` : ''}
       ${state.attemptedNodeIds[node.id] && validation.errors.length ? '<p class="event-error">Add at least one session.</p>' : ''}
     `;
+  }
+
+  // Children are kept off the map, so the inspector is the only surface that can
+  // offer the way back up to the session the glance row came from.
+  function renderSessionChildBackLink(node) {
+    const parent = node.parentSessionId ? getNodeById(node.parentSessionId) : null;
+    if (!parent) return '';
+    const title = getSessionTitle(parent.id);
+    return `<button type="button" class="event-back-link" data-action="select-parent-session" data-node-id="${parent.id}" aria-label="Back to ${escapeHtml(title)}">`
+      + '<span class="event-back-link-arrow" aria-hidden="true">\u2190</span>'
+      + `<span class="event-back-link-title">${escapeHtml(title)}</span>`
+      + '</button>';
   }
 
   function renderSessionChildForm(node, validation) {
@@ -3296,7 +3516,7 @@
     if (node.type === NODE_TYPES.SESSION_SCHEDULE) {
       return `
         <div class="event-field"><label for="event-session-schedule-date">Date</label><input id="event-session-schedule-date" type="date" name="session-schedule-date" value="${escapeHtml(payload.date || '')}" /></div>
-        <div class="event-inline-actions"><div class="event-field"><label for="event-session-schedule-start">Start</label><input id="event-session-schedule-start" type="time" name="session-schedule-start" value="${escapeHtml(payload.startTime || '')}" /></div><div class="event-field"><label for="event-session-schedule-end">End</label><input id="event-session-schedule-end" type="time" name="session-schedule-end" value="${escapeHtml(payload.endTime || '')}" /></div></div>
+        <div class="event-inline-actions event-field-pair"><div class="event-field"><label for="event-session-schedule-start">Start</label><input id="event-session-schedule-start" type="time" name="session-schedule-start" value="${escapeHtml(payload.startTime || '')}" /></div><div class="event-field"><label for="event-session-schedule-end">End</label><input id="event-session-schedule-end" type="time" name="session-schedule-end" value="${escapeHtml(payload.endTime || '')}" /></div></div>
         <div class="event-field"><label for="event-session-schedule-timezone">Timezone</label><input id="event-session-schedule-timezone" name="session-schedule-timezone" value="${escapeHtml(payload.timezone || '')}" placeholder="America/Los_Angeles" /></div>
         ${showErrors && validation.errors.length ? `<p class="event-error">${escapeHtml(validation.errors[0])}</p>` : ''}
       `;
@@ -3398,53 +3618,55 @@
     return `<div class="event-field event-sync-field"><span class="event-inline-label">Synced by agent</span><div class="event-sync-pills">${pills.join('')}</div></div>`;
   }
 
-  function renderAudienceField() {
+  function getAudienceSummary() {
     const meta = (state.draft && state.draft.meta) || {};
     const audience = meta.audience;
     if (!audience || !audience.total) return '';
     const segments = (audience.segments || []).map(function (segment) {
       return `${segment.label} ${segment.seats}`;
     }).join(' / ');
-    return `<div class="event-field event-sync-field">
-      <span class="event-inline-label">Audience</span>
-      <p class="event-helper">${escapeHtml(audience.total + ' from ' + audience.source)}${audience.due ? ` \u00b7 due ${escapeHtml(audience.due)}` : ''}${segments ? ` \u00b7 ${escapeHtml(segments)}` : ''}</p>
-    </div>`;
+    return `${audience.total} from ${audience.source}`
+      + (audience.due ? ` \u00b7 due ${audience.due}` : '')
+      + (segments ? ` \u00b7 ${segments}` : '');
   }
 
   // The map is a clean overview, so the click has to pay off: lead the session
-  // form with its key facts (schedule / venue / capacity / instructors) pulled
-  // from the child nodes, above the drill-in list and the agent-synced pills.
+  // form with every one of its cards, each showing what it holds and how far
+  // along it is. One list rather than a value summary and a status list side by
+  // side, since both only ever led to the same editor.
   function renderSessionAtAGlance(sessionId) {
-    const labelByType = {};
-    labelByType[NODE_TYPES.SESSION_SCHEDULE] = 'Schedule';
-    labelByType[NODE_TYPES.SESSION_VENUE] = 'Venue';
-    labelByType[NODE_TYPES.SESSION_CAPACITY] = 'Capacity';
-    labelByType[NODE_TYPES.SESSION_INSTRUCTORS] = 'Instructors';
-    const order = [NODE_TYPES.SESSION_SCHEDULE, NODE_TYPES.SESSION_VENUE, NODE_TYPES.SESSION_CAPACITY, NODE_TYPES.SESSION_INSTRUCTORS];
     const children = getSessionChildNodes(state.draft, sessionId);
-    const rows = order.map(function (type) {
-      const child = children.find(function (item) { return item.type === type; });
+    const rows = SESSION_CHILD_DEFS.map(function (def) {
+      const child = children.find(function (item) { return item.type === def.type; });
       if (!child) return '';
+
+      const status = nodeStatus(child);
       const value = getNodeSummary(child);
+      // The status already says a card is empty, so a value line reading
+      // "Not set" beside a "Not started" pill would only repeat it.
+      const valueLine = hasText(value)
+        ? `<span class="event-glance-value">${escapeHtml(value)}</span>`
+        : '';
+
       // A button, not a div: the glance doubles as the way into each editor, so
       // clicking a row drills straight into that card's fields.
-      return `<button type="button" class="event-glance-row" data-action="focus-session-child" data-node-id="${child.id}"><span class="event-glance-label">${escapeHtml(labelByType[type])}</span><span class="event-glance-value${hasText(value) ? '' : ' is-empty'}">${hasText(value) ? escapeHtml(value) : 'Not set'}</span></button>`;
+      return `<button type="button" class="event-glance-row" data-action="focus-session-child" data-node-id="${child.id}">`
+        + `<span class="event-glance-label">${escapeHtml(def.label)}</span>`
+        + attentionStatusPill(status, 'event-glance-status')
+        + valueLine
+        + '</button>';
     }).filter(Boolean).join('');
+
     if (!rows) return '';
     return `<div class="event-field event-glance"><span class="event-inline-label">At a glance</span><div class="event-glance-grid">${rows}</div></div>`;
   }
 
   function renderSessionNodeForm(node) {
     const payload = state.draft.payloadByNodeId[node.id] || {};
-    const childSummary = getSessionChildNodes(state.draft, node.id).map(function (child) {
-      const childValidation = validateNode(child);
-      return `<li><button type="button" class="event-link-button" data-action="focus-session-child" data-node-id="${child.id}">${escapeHtml(child.label)}</button> — ${escapeHtml(nodeStatus(child))}${childValidation.errors.length ? ' (needs attention)' : ''}</li>`;
-    }).join('');
     return `
-      <div class="event-field"><label for="event-session-title">Session name</label><input id="event-session-title" name="session-title" value="${escapeHtml(payload.title || '')}" /><p class="event-helper">Set the schedule, venue, capacity and instructors on the cards below this session.</p></div>
+      <div class="event-field"><label for="event-session-title">Session name</label><input id="event-session-title" name="session-title" value="${escapeHtml(payload.title || '')}" /><p class="event-helper">Pick any card below to set the schedule, venue, capacity and instructors.</p></div>
       ${renderSessionAtAGlance(node.id)}
       ${renderSessionSyncField(node.id)}
-      <div class="event-field"><span class="event-inline-label">Session details</span><ul class="event-session-child-summary">${childSummary || '<li>No details yet.</li>'}</ul></div>
     `;
   }
 
@@ -3463,7 +3685,10 @@
     if (node.type === NODE_TYPES.BANNER) { DOM.form.innerHTML = renderBannerForm(node, validation); return; }
     if (node.type === NODE_TYPES.SESSIONS) { DOM.form.innerHTML = renderSessionsForm(node, validation); return; }
     if (node.type === NODE_TYPES.SESSION) { DOM.form.innerHTML = renderSessionNodeForm(node); return; }
-    if (isSessionChildType(node.type)) { DOM.form.innerHTML = renderSessionChildForm(node, validation); return; }
+    if (isSessionChildType(node.type)) {
+      DOM.form.innerHTML = renderSessionChildBackLink(node) + renderSessionChildForm(node, validation);
+      return;
+    }
     DOM.form.innerHTML = '<p class="event-helper">No editable properties for this node.</p>';
   }
 
@@ -3570,14 +3795,6 @@
       return;
     }
 
-    if (target.dataset.action === 'update-session-title') {
-      const sessionId = target.dataset.sessionId;
-      const sessionNode = state.draft.nodes.find(function (item) { return item.id === sessionId; });
-      if (!sessionNode) return;
-      setSessionTitle(state.draft, sessionId, target.value);
-      markDirty();
-      renderSummary();
-    }
   }
 
   // Shared by the free-text field and the quick-add chips, so an assignment
@@ -3754,6 +3971,9 @@
     showToast('Draft saved locally.', 4000);
   }
 
+  // Reached from publishShortcut when the checklist has something to answer,
+  // never as a step of its own: publish runs the same validation and only
+  // stops here when it must.
   function openPublishReview() {
     if (!state.isInitialized || !state.draft) return;
 
@@ -3763,7 +3983,6 @@
       return;
     }
 
-    state.draft.meta.publishStatus = 'reviewed';
     renderAll();
     renderPublishReviewModal(result.checklist);
     showPublishReviewModal();
@@ -3941,13 +4160,19 @@
   }
 
   function resetCurrentDraft() {
-    const shouldReset = window.confirm('Reset current draft to a blank event? This cannot be undone.');
+    const shouldReset = window.confirm('Discard this event and go back to Home? This cannot be undone.');
     if (!shouldReset) return;
     loadDraft(createDraft());
-    saveDraft(false);
+    // Leave nothing behind. Persisting a blank draft is what puts a stale event
+    // back in front of whoever opens the prototype next.
+    window.localStorage.removeItem(STORAGE_KEY);
     showColdStart();
     resetCanvasView();
-    showToast('Draft reset.', 4000);
+    // Discarding is a full restart, not a state inside the editor: the chat and
+    // the workspace both go back to where the flow starts.
+    if (typeof window.resetChatConversation === 'function') window.resetChatConversation();
+    if (typeof window.closeEventWorkspace === 'function') window.closeEventWorkspace();
+    showToast('Event discarded.', 4000);
   }
 
   function initializeEditor() {
@@ -3988,11 +4213,43 @@
     loadSampleDraft();
   });
 
+  // Discarding lives behind an overflow so a destructive action is never one
+  // stray click away from Save. Wired here rather than in chat.js because the
+  // standalone editor page loads this file but not that one.
+  // Dragging the chat panel resizes the canvas without a window resize event,
+  // so whether the graph still fits is re-read from the element itself.
+  if (typeof window.ResizeObserver === 'function' && DOM.canvas) {
+    new window.ResizeObserver(function () {
+      updateZoomClusterVisibility();
+    }).observe(DOM.canvas);
+  }
+
+  (function wireWorkspaceOverflow() {
+    const toggle = document.getElementById('workspace-overflow-toggle');
+    const menu = document.getElementById('workspace-overflow-menu');
+    if (!toggle || !menu) return;
+
+    function setOpen(isOpen) {
+      toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+      menu.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+    }
+
+    toggle.addEventListener('click', function (event) {
+      event.stopPropagation();
+      setOpen(toggle.getAttribute('aria-expanded') !== 'true');
+    });
+    menu.addEventListener('click', function () { setOpen(false); });
+    document.addEventListener('click', function (event) {
+      if (!menu.contains(event.target) && !toggle.contains(event.target)) setOpen(false);
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') setOpen(false);
+    });
+  }());
+
   DOM.closeButton && DOM.closeButton.addEventListener('click', resetCurrentDraft);
   DOM.saveButton && DOM.saveButton.addEventListener('click', saveDraftLocal);
   DOM.workspaceSaveButton && DOM.workspaceSaveButton.addEventListener('click', saveDraftLocal);
-  DOM.reviewButton && DOM.reviewButton.addEventListener('click', openPublishReview);
-  DOM.workspaceReviewButton && DOM.workspaceReviewButton.addEventListener('click', openPublishReview);
   DOM.publishButton && DOM.publishButton.addEventListener('click', publishShortcut);
   DOM.workspacePublishButton && DOM.workspacePublishButton.addEventListener('click', publishShortcut);
 
@@ -4065,8 +4322,9 @@
     window.setTimeout(function () {
       if (DOM.aiGenerating) DOM.aiGenerating.classList.add('is-hidden');
       if (DOM.aiSubmit) DOM.aiSubmit.disabled = false;
-      // The human reviews the parsed plan before it maps out; Build commits it.
-      openProposalReview(parseEventPrompt(text));
+      // Same beat as the chat path: draft, then reveal on the map. Review moved
+      // after the reveal so both describe-your-event surfaces tell one story.
+      buildAndRevealFromParams(parseEventPrompt(text));
       if (DOM.aiInput) DOM.aiInput.value = '';
     }, 620);
   }
@@ -4291,6 +4549,67 @@
     renderCanvas();
   }, true);
 
+  // The session menus live inside the form, which renderAll rebuilds wholesale,
+  // so an open menu closes itself on any model change. These helpers only have
+  // to handle the cases that change nothing: another toggle, a click away, the
+  // keyboard.
+  function getOpenSessionMenu() {
+    return document.querySelector('.event-session-menu[aria-hidden="false"]');
+  }
+
+  function getSessionMenuItems(menu) {
+    return Array.prototype.slice.call(menu.querySelectorAll('.workspace-overflow-item')).filter(function (item) {
+      return !item.disabled;
+    });
+  }
+
+  function closeSessionMenus(restoreFocus) {
+    const open = getOpenSessionMenu();
+    document.querySelectorAll('.event-session-menu[aria-hidden="false"]').forEach(function (menu) {
+      menu.setAttribute('aria-hidden', 'true');
+    });
+    document.querySelectorAll('.event-session-item.is-menu-above').forEach(function (item) {
+      item.classList.remove('is-menu-above');
+    });
+    document.querySelectorAll('.event-session-menu-toggle[aria-expanded="true"]').forEach(function (toggle) {
+      toggle.setAttribute('aria-expanded', 'false');
+      // Dismissing by keyboard has to put focus somewhere deliberate, or it
+      // falls back to the body and the next Tab restarts from the top.
+      if (restoreFocus && open && open.closest('.event-session-item') === toggle.closest('.event-session-item')) {
+        toggle.focus();
+      }
+    });
+  }
+
+  function openSessionMenu(toggle) {
+    const item = toggle.closest('.event-session-item');
+    const menu = item && item.querySelector('.event-session-menu');
+    if (!menu) return;
+    toggle.setAttribute('aria-expanded', 'true');
+    menu.setAttribute('aria-hidden', 'false');
+
+    // The form scrolls, which means it clips its own absolutely positioned
+    // children. Drop the menu above the card when there is not room under it,
+    // otherwise a session near the bottom of a long list opens into nothing.
+    const room = DOM.form.getBoundingClientRect().bottom - item.getBoundingClientRect().bottom;
+    if (room < menu.offsetHeight) item.classList.add('is-menu-above');
+
+    const items = getSessionMenuItems(menu);
+    if (items.length) items[0].focus();
+  }
+
+  function moveSessionMenuFocus(menu, step) {
+    const items = getSessionMenuItems(menu);
+    if (!items.length) return;
+    const current = items.indexOf(document.activeElement);
+    const next = current === -1
+      ? (step > 0 ? 0 : items.length - 1)
+      : (current + step + items.length) % items.length;
+    items[next].focus();
+  }
+
+  document.addEventListener('click', function () { closeSessionMenus(); });
+
   DOM.form.addEventListener('submit', function (event) { event.preventDefault(); });
   // Cards show live payload values now, so any field edit can change the canvas.
   // Repainting here rather than inside updateSelectedNode keeps the inspector
@@ -4301,12 +4620,27 @@
   DOM.form.addEventListener('click', function (event) {
     const action = event.target.closest('[data-action]');
     if (!action) return;
+    if (action.dataset.action === 'toggle-session-menu') {
+      const wasOpen = action.getAttribute('aria-expanded') === 'true';
+      closeSessionMenus();
+      if (!wasOpen) openSessionMenu(action);
+      // Opening a menu changes nothing in the draft, so this deliberately does
+      // not re-render. Stop the click here or the document listener below
+      // closes the menu in the same tick.
+      event.stopPropagation();
+      return;
+    }
     if (action.dataset.action === 'focus-session') {
       state.selectedNodeId = action.dataset.sessionId;
       renderAll();
       return;
     }
     if (action.dataset.action === 'focus-session-child') {
+      state.selectedNodeId = action.dataset.nodeId;
+      renderAll();
+      return;
+    }
+    if (action.dataset.action === 'select-parent-session') {
       state.selectedNodeId = action.dataset.nodeId;
       renderAll();
       return;
@@ -4354,10 +4688,49 @@
       return;
     }
 
+    // role="menu" promises menu keys, so honour them rather than leaving the
+    // roles as decoration on a popover that only takes clicks.
+    const openMenu = getOpenSessionMenu();
+    if (openMenu) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeSessionMenus(true);
+        return;
+      }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        moveSessionMenuFocus(openMenu, event.key === 'ArrowDown' ? 1 : -1);
+        return;
+      }
+      if (event.key === 'Home' || event.key === 'End') {
+        event.preventDefault();
+        const items = getSessionMenuItems(openMenu);
+        if (items.length) items[event.key === 'Home' ? 0 : items.length - 1].focus();
+        return;
+      }
+      // Tab leaves the menu behind, so close it and let focus move on.
+      if (event.key === 'Tab') {
+        closeSessionMenus();
+        return;
+      }
+    }
+
     if (event.key === 'Escape' && state.openInsertKey) {
       state.openInsertKey = null;
       renderCanvas();
       return;
+    }
+
+    // Escape mirrors the back link. Safe to fire from inside a field: the form
+    // writes through on input, so nothing typed is lost on the way up.
+    if (event.key === 'Escape' && state.isInitialized && state.selectedNodeId) {
+      const modalOpen = DOM.publishReviewModal && !DOM.publishReviewModal.classList.contains('is-hidden');
+      const selected = getNodeById(state.selectedNodeId);
+      if (!modalOpen && selected && isSessionChildType(selected.type) && selected.parentSessionId) {
+        state.selectedNodeId = selected.parentSessionId;
+        renderAll();
+        return;
+      }
     }
 
     if (event.key === 'Delete' && state.isInitialized && state.selectedNodeId) {
@@ -4376,15 +4749,19 @@
   DOM.zoomOutButton && DOM.zoomOutButton.addEventListener('click', function () {
     setCanvasZoom(state.canvasView.scale - 0.1);
   });
-  DOM.zoomResetButton && DOM.zoomResetButton.addEventListener('click', resetCanvasView);
   DOM.fitGraphButton && DOM.fitGraphButton.addEventListener('click', fitCanvasToGraph);
 
-  DOM.viewToggle && DOM.viewToggle.addEventListener('click', function () {
-    state.viewMode = state.viewMode === 'map' ? 'outline' : 'map';
-    if (state.viewMode === 'map') resetCanvasView();
+  function setViewMode(nextMode) {
+    if (state.viewMode === nextMode) return;
+    state.viewMode = nextMode;
+    if (nextMode === 'map') resetCanvasView();
     renderView();
-    if (state.viewMode === 'map') fitCanvasToGraph();
-  });
+    if (nextMode === 'map') fitCanvasToGraph();
+    updateViewToggle();
+  }
+
+  DOM.viewMapButton && DOM.viewMapButton.addEventListener('click', function () { setViewMode('map'); });
+  DOM.viewOutlineButton && DOM.viewOutlineButton.addEventListener('click', function () { setViewMode('outline'); });
 
   // ---------------------------------------------------------------------------
   // AI-style event generation (deterministic, prototype-only).
@@ -4856,7 +5233,9 @@
   window.ArcticEventAdmin = {
     openWorkspace: openWorkspace,
     saveDraftLocal: saveDraftLocal,
-    openPublishReview: openPublishReview,
+    // Callers ask to publish; the checklist is this function's business, not
+    // theirs, so there is no separate review entry point on the API.
+    publish: publishShortcut,
     publishEvent: publishEvent,
     validateAndSave: validateAndSave,
     loadTemplateDraft: loadTemplateDraft,
@@ -4875,6 +5254,14 @@
     getEventContext: getEventContext,
     applyEnterprise: applyEnterprise,
     getEnterpriseSyncSummary: getEnterpriseSyncSummary,
+    // Read-only counts so the chat can say whether the event is publishable
+    // without running the validation pass, which flags every unvisited field.
+    getPublishReadiness: function () {
+      if (!state.draft) return null;
+      const checklist = computePublishChecklist(state.draft);
+      return { blockers: checklist.blockers.length, warnings: checklist.warnings.length };
+    },
+    clearToast: clearToast,
     getViewMode: function () { return state.viewMode; },
     setNodeFocusHandler: function (handler) { state.onNodeFocus = typeof handler === 'function' ? handler : null; },
     setEventBuiltHandler: function (handler) { state.onEventBuilt = typeof handler === 'function' ? handler : null; },

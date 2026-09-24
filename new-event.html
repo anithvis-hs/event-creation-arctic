@@ -23,11 +23,18 @@
           <h1>New Event</h1>
         </div>
         <div class="workspace-header-actions">
+          <span class="workspace-save-status" id="event-admin-meta" aria-live="polite"></span>
           <a class="home-task-action workspace-link-action" href="index.html#events-workspace">Back to Home</a>
-          <button type="button" class="home-task-action" id="event-admin-close-button">Reset</button>
-          <button type="button" class="home-task-action" id="workspace-save-button">Save</button>
-          <button type="button" class="home-task-action" id="workspace-review-button">Review</button>
+          <button type="button" class="workspace-quiet-action" id="workspace-save-button">Save</button>
           <button type="button" class="home-task-action home-task-action-primary" id="workspace-publish-button">Publish</button>
+          <div class="workspace-overflow">
+            <button type="button" class="event-toolbar-icon" id="workspace-overflow-toggle" aria-label="More event actions" aria-haspopup="menu" aria-expanded="false" aria-controls="workspace-overflow-menu">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg>
+            </button>
+            <div class="workspace-overflow-menu" id="workspace-overflow-menu" role="menu" aria-hidden="true">
+              <button type="button" class="workspace-overflow-item is-destructive" id="event-admin-close-button" role="menuitem">Discard event</button>
+            </div>
+          </div>
         </div>
       </header>
       <div class="content-pane-divider"></div>
