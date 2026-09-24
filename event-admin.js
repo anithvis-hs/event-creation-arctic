@@ -1527,7 +1527,20 @@
     setSessionTitle(state.draft, newSessionId, copyTitle);
 
     syncGraphStructure(state.draft);
-    state.selectedNodeId = newSessionId;
+
+    // addNodeByType appends, so the copy arrives at the end of the list. Move it
+    // to sit directly under the session it came from, which is where it is
+    // looked for. Redistributing the order values the session nodes already
+    // hold keeps the renumbering clear of the other nodes on the spine, which
+    // share the same order space.
+    const ordered = state.draft.sessions.filter(function (id) { return id !== newSessionId; });
+    ordered.splice(ordered.indexOf(sessionId) + 1, 0, newSessionId);
+    const slots = ordered.map(function (id) { return getNodeById(id).order; }).sort(function (a, b) { return a - b; });
+    ordered.forEach(function (id, index) { getNodeById(id).order = slots[index]; });
+    syncGraphStructure(state.draft);
+
+    // Deliberately no selection change: you asked for a copy, not to be moved
+    // somewhere else. The copy is visible in place wherever you triggered this.
     markDirty();
     renderAll();
   }
@@ -3670,26 +3683,36 @@
     `;
   }
 
-  function renderForm() {
-    const node = state.draft.nodes.find(function (item) { return item.id === state.selectedNodeId; });
+  function renderFormMarkup(node) {
     if (!node) {
       const hint = state.viewMode === 'map'
         ? 'Select any session on the map to see its schedule, venue, capacity, instructors, and what the agent synced here.'
         : 'Pick a row in the outline to edit it.';
-      DOM.form.innerHTML = `<p class="event-helper">${hint}</p>`;
-      return;
+      return `<p class="event-helper">${hint}</p>`;
     }
     const validation = validateNode(node);
-    if (node.type === NODE_TYPES.BASICS) { DOM.form.innerHTML = renderBasicsForm(node, validation); return; }
-    if (node.type === NODE_TYPES.REGISTRATION) { DOM.form.innerHTML = renderRegistrationForm(node, validation); return; }
-    if (node.type === NODE_TYPES.BANNER) { DOM.form.innerHTML = renderBannerForm(node, validation); return; }
-    if (node.type === NODE_TYPES.SESSIONS) { DOM.form.innerHTML = renderSessionsForm(node, validation); return; }
-    if (node.type === NODE_TYPES.SESSION) { DOM.form.innerHTML = renderSessionNodeForm(node); return; }
-    if (isSessionChildType(node.type)) {
-      DOM.form.innerHTML = renderSessionChildBackLink(node) + renderSessionChildForm(node, validation);
-      return;
-    }
-    DOM.form.innerHTML = '<p class="event-helper">No editable properties for this node.</p>';
+    if (node.type === NODE_TYPES.BASICS) return renderBasicsForm(node, validation);
+    if (node.type === NODE_TYPES.REGISTRATION) return renderRegistrationForm(node, validation);
+    if (node.type === NODE_TYPES.BANNER) return renderBannerForm(node, validation);
+    if (node.type === NODE_TYPES.SESSIONS) return renderSessionsForm(node, validation);
+    if (node.type === NODE_TYPES.SESSION) return renderSessionNodeForm(node);
+    if (isSessionChildType(node.type)) return renderSessionChildBackLink(node) + renderSessionChildForm(node, validation);
+    return '<p class="event-helper">No editable properties for this node.</p>';
+  }
+
+  function renderForm() {
+    const node = state.draft.nodes.find(function (item) { return item.id === state.selectedNodeId; });
+    const nodeId = node ? node.id : '';
+    const previousNodeId = DOM.form.dataset.nodeId || '';
+    const previousScroll = DOM.form.scrollTop;
+
+    DOM.form.innerHTML = renderFormMarkup(node);
+    DOM.form.dataset.nodeId = nodeId;
+
+    // Same node means the list did not change out from under you, so hold your
+    // place in it: duplicating or reordering a session eight rows down should
+    // not throw you back to the top. A different node is a new thing to read.
+    if (previousNodeId === nodeId) DOM.form.scrollTop = previousScroll;
   }
 
   function renderAll() {
