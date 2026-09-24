@@ -1191,6 +1191,27 @@ body.resizing-panel {
   width: 100%;
 }
 
+/* Empty-state for the AI event path: a lede plus the same example prompts the
+   workspace cold start offers, so the composer is never a blank invitation. */
+.chat-prompt-starters {
+  display: grid;
+  gap: var(--space-sm);
+  width: 100%;
+}
+
+.chat-prompt-starters-lede {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--line-height-relaxed);
+  letter-spacing: 0.03px;
+}
+
+.chat-prompt-starter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2xs);
+}
+
 /* Agent "thinking" loading state: sparkle + cycling status phrase + a
    decorative chevron, shown briefly before the streamed reply replaces it. */
 .ai-thinking {
@@ -1414,11 +1435,30 @@ body.resizing-panel {
   border-top: 0;
 }
 
+/* Five fields will not fit across a side panel, so each session is a small
+   stacked card instead: the name it is known by, then when and how big. */
 .ai-structure-branches.is-editable li.ai-structure-branch {
   display: grid;
-  grid-template-columns: 1.1fr 0.6fr 1fr 1.2fr auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 76px) 24px;
+  grid-template-areas:
+    "name  name  remove"
+    "date  seats ."
+    "tz    tz    .";
   align-items: end;
   gap: var(--space-2xs);
+  padding: var(--space-2xs);
+  border: 1px solid rgba(51, 78, 92, 0.12);
+  border-radius: var(--radius-xs);
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.ai-structure-branch > .ai-structure-field[data-field="name"] { grid-area: name; }
+.ai-structure-branch > .ai-structure-field[data-field="capacity"] { grid-area: seats; }
+.ai-structure-branch > .ai-structure-field[data-field="date"] { grid-area: date; }
+.ai-structure-branch > .ai-structure-field[data-field="timezone"] { grid-area: tz; }
+
+.ai-structure-branches.is-editable li.ai-structure-branch .ai-structure-branch-remove {
+  grid-area: remove;
 }
 
 /* Per-row remove sits in its own trailing column so it lines up with inputs. */
@@ -2704,6 +2744,87 @@ a.switcher-nav-link {
   text-decoration: none;
 }
 
+/* Save is available but not competing with Review and Publish, so it reads as
+   text next to the save state rather than as a third outlined button. */
+.workspace-quiet-action {
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-family-base);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1.3;
+  padding: var(--space-3xs) var(--space-2xs);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: background-color var(--polar-motion-duration-fast) var(--polar-motion-easing-standard),
+    color var(--polar-motion-duration-fast) var(--polar-motion-easing-standard);
+}
+
+.workspace-quiet-action:hover:not(:disabled) {
+  background: rgba(51, 78, 92, 0.06);
+  color: var(--text-primary);
+}
+
+.workspace-quiet-action:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.workspace-quiet-action.is-hidden {
+  display: none;
+}
+
+.workspace-overflow {
+  position: relative;
+  display: inline-flex;
+}
+
+.workspace-overflow-menu {
+  position: absolute;
+  top: calc(100% + var(--space-4xs));
+  right: 0;
+  /* Above the toast host (130), which occupies the same top-right corner. */
+  z-index: 140;
+  min-width: 168px;
+  display: grid;
+  gap: var(--space-5xs);
+  padding: var(--space-4xs);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border);
+  background: var(--background-base);
+  box-shadow: 0 8px 24px rgba(51, 78, 92, 0.16);
+}
+
+.workspace-overflow-menu[aria-hidden="true"] {
+  display: none;
+}
+
+.workspace-overflow-item {
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font-family: var(--font-family-base);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  padding: var(--space-3xs) var(--space-2xs);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: background-color var(--polar-motion-duration-fast) var(--polar-motion-easing-standard);
+}
+
+.workspace-overflow-item:hover {
+  background: rgba(51, 78, 92, 0.06);
+}
+
+.workspace-overflow-item.is-destructive {
+  color: #b3261e;
+}
+
+.workspace-overflow-item.is-destructive:hover {
+  background: rgba(179, 38, 30, 0.08);
+}
+
 .workspace-event-preview.is-hidden {
   display: none;
 }
@@ -2866,6 +2987,12 @@ a.switcher-nav-link {
   text-decoration: underline;
 }
 
+/* Reads as the record's parent Spot without promising a destination. */
+.event-toolbar-link.is-inert {
+  color: var(--text-secondary);
+  cursor: default;
+}
+
 .event-toolbar-sep {
   color: var(--text-secondary);
   opacity: 0.5;
@@ -2887,6 +3014,9 @@ a.switcher-nav-link {
   font-family: inherit;
   font-size: var(--text-sm);
   color: var(--text-secondary);
+  /* A two-word label wrapping turns the segmented control into a block that
+     collides with whatever sits beside it in the toolbar. */
+  white-space: nowrap;
   cursor: pointer;
   transition: background-color var(--polar-motion-duration-fast) var(--polar-motion-easing-standard),
     color var(--polar-motion-duration-fast) var(--polar-motion-easing-standard);
@@ -2972,6 +3102,55 @@ a.switcher-nav-link {
   border-bottom-color: var(--accent-blue, #2ABAF8);
 }
 
+.event-overview-tab.is-preview-only {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.event-overview-tab.is-preview-only:hover {
+  border-bottom-color: transparent;
+}
+
+/* Attendee view: registration is the only thing being asked of the reader. */
+.event-attendee-cta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2xs);
+  margin-top: var(--space-xs);
+}
+
+.event-attendee-register {
+  border: 0.5px solid rgba(42, 186, 248, 0.88);
+  border-radius: var(--radius-sm);
+  background: rgba(42, 186, 248, 0.88);
+  padding: var(--space-2xs) var(--space-md);
+  font-family: inherit;
+  font-size: var(--text-md);
+  font-weight: 500;
+  line-height: 1.3;
+  color: #fff;
+  cursor: pointer;
+  transition: background var(--polar-motion-duration-fast) var(--polar-motion-easing-standard);
+}
+
+.event-attendee-register:hover:not(:disabled) {
+  background: rgba(42, 186, 248, 1);
+}
+
+.event-attendee-register:disabled {
+  background: rgba(51, 78, 92, 0.08);
+  border-color: rgba(51, 78, 92, 0.16);
+  color: var(--text-secondary);
+  cursor: default;
+}
+
+.event-attendee-cta-note {
+  font-size: var(--text-sm);
+  line-height: var(--line-height-sm);
+  color: var(--text-secondary);
+}
+
 /* Hero: generated cover + at-a-glance panel */
 .event-overview-hero {
   display: grid;
@@ -3012,12 +3191,26 @@ a.switcher-nav-link {
   height: 100%;
 }
 
+/* The map + arcs + markers share this frame, which keeps the map's true
+   950:620 aspect ratio (no horizontal stretch) while covering the banner's
+   width. It is nudged up so the northern-hemisphere region band stays centred
+   in the shorter banner; the empty poles and southern ocean are cropped. */
+.event-cover-worldmap {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 100%;
+  aspect-ratio: 950 / 620;
+  transform: translateY(-32%);
+  pointer-events: none;
+}
+
 .event-cover-worldmap-img {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: fill;
+  object-fit: cover;
   opacity: 0.5;
   pointer-events: none;
 }
@@ -3449,7 +3642,9 @@ a.switcher-nav-link {
   min-height: 0;
   width: 100%;
   display: grid;
-  grid-template-columns: minmax(200px, 220px) minmax(0, 1fr) minmax(220px, 260px);
+  /* The palette is five short labels; the canvas is the thing being read, so
+     the spare width goes there rather than into the list's right margin. */
+  grid-template-columns: minmax(176px, 188px) minmax(0, 1fr) minmax(220px, 260px);
 }
 
 .event-admin-palette-panel,
@@ -3713,13 +3908,14 @@ a.switcher-nav-link {
   position: relative;
 }
 
-.event-admin-canvas-meta {
+/* Save state belongs next to the actions that change it, not in the canvas
+   toolbar where it competed with the view controls for the same strip. */
+.workspace-save-status {
   color: #99a6ad;
-  font-size: 10px;
+  font-size: var(--text-xs);
   line-height: var(--line-height-tight);
-  margin-left: auto;
-  max-width: 100%;
-  text-align: right;
+  margin-right: var(--space-2xs);
+  white-space: nowrap;
 }
 
 /* Cold start owns the panel until an event exists, so the builder grid stands
@@ -4000,6 +4196,17 @@ a.switcher-nav-link {
   flex-wrap: wrap;
   flex: 1;
   min-width: 0;
+}
+
+/* Same segmented control as the overview toolbar, sized down to sit with the
+   status chips instead of dominating the strip. */
+.event-view-switch {
+  margin-left: auto;
+}
+
+.event-view-switch .event-toolbar-toggle-btn {
+  font-size: var(--text-xs);
+  padding: var(--space-5xs) var(--space-2xs);
 }
 
 .event-admin-canvas.is-space-pan {

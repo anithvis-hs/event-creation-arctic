@@ -22,7 +22,10 @@
   const CANVAS_MAX_ZOOM = 1.6;
   // Below roughly this scale the node titles and summaries stop being readable,
   // so intro framing never zooms out past it.
-  const CANVAS_INTRO_MIN_ZOOM = 0.7;
+  // Floor for the reveal only, so a wide session fan still lands whole in the
+  // frame. Node titles stay legible at this scale and the inspector carries
+  // the detail anyway.
+  const CANVAS_INTRO_MIN_ZOOM = 0.62;
   const STATUS = {
     NOT_STARTED: 'Not started',
     IN_PROGRESS: 'In progress',
@@ -197,10 +200,10 @@
     alert: document.getElementById('event-admin-alert'),
     zoomInButton: document.getElementById('event-canvas-zoom-in'),
     zoomOutButton: document.getElementById('event-canvas-zoom-out'),
-    zoomResetButton: document.getElementById('event-canvas-zoom-reset'),
     zoomLabel: document.getElementById('event-canvas-zoom-label'),
     fitGraphButton: document.getElementById('event-canvas-fit-graph'),
-    viewToggle: document.getElementById('event-view-toggle'),
+    viewMapButton: document.getElementById('event-view-map'),
+    viewOutlineButton: document.getElementById('event-view-outline'),
     zoomCluster: document.getElementById('event-canvas-zoom-cluster'),
     canvasHeading: document.getElementById('event-canvas-heading'),
     publishReviewModal: document.getElementById('event-publish-review-modal'),
@@ -1257,6 +1260,7 @@
     // on-screen size, the way canvas tools keep their controls legible.
     viewport.style.setProperty('--canvas-zoom', String(state.canvasView.scale));
     updateCanvasZoomLabel();
+    updateZoomClusterVisibility();
   }
 
   function getCanvasContainerPoint(clientX, clientY) {
@@ -1293,27 +1297,44 @@
     applyCanvasTransform();
   }
 
+  // The layout box is wider and taller than the nodes it holds: it is sized
+  // from a centre line plus padding, so framing against it leaves the map
+  // shrunk and pushed off to one side. Framing against the nodes themselves is
+  // what makes the graph land centred and filling the frame.
+  function getGraphContentBounds() {
+    const entries = state.layout && state.layout.entries;
+    if (!entries || !entries.length) return null;
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    entries.forEach(function (entry) {
+      minX = Math.min(minX, entry.x);
+      minY = Math.min(minY, entry.y);
+      maxX = Math.max(maxX, entry.x + entry.width);
+      maxY = Math.max(maxY, entryBottom(entry));
+    });
+    if (minX === Infinity) return null;
+
+    return { minX: minX, minY: minY, width: maxX - minX, height: maxY - minY };
+  }
+
   function fitCanvasToGraph() {
-    if (!state.draft || !state.layout) return;
-    const padding = 32;
-    const graphWidth = state.layout.width;
-    const graphHeight = state.layout.height;
+    const bounds = getGraphContentBounds();
+    if (!state.draft || !bounds) return;
+    const padding = 24;
     const viewWidth = Math.max(1, DOM.canvas.clientWidth);
     const viewHeight = Math.max(1, DOM.canvas.clientHeight);
-    const scaleX = (viewWidth - (padding * 2)) / graphWidth;
-    const scaleY = (viewHeight - (padding * 2)) / graphHeight;
+    const scaleX = (viewWidth - (padding * 2)) / bounds.width;
+    const scaleY = (viewHeight - (padding * 2)) / bounds.height;
     const scale = Math.max(CANVAS_MIN_ZOOM, Math.min(CANVAS_MAX_ZOOM, Math.min(scaleX, scaleY, 1)));
     state.canvasView.scale = scale;
-    state.canvasView.panX = Math.max(0, (viewWidth - (graphWidth * scale)) / 2);
-    state.canvasView.panY = 0;
+    state.canvasView.panX = ((viewWidth - (bounds.width * scale)) / 2) - (bounds.minX * scale);
+    state.canvasView.panY = ((viewHeight - (bounds.height * scale)) / 2) - (bounds.minY * scale);
     applyCanvasTransform();
   }
 
-  // Framing used right after an assistant build. Fitting the whole graph drops
-  // below the point where node labels and status chips can be read, and the
-  // information here is horizontal anyway: parallel branches side by side. So
-  // fit the width, keep the scale legible, and let branch depth run off the
-  // bottom as an invitation to scroll.
   // A freshly built event reveals on the map so the admin sees the whole shape
   // at once (the wow of "the AI built this"); narrow screens fall back to the
   // outline, which the toggle still reaches. Callers set this before renderAll
@@ -1324,15 +1345,35 @@
     state.viewMode = narrow ? 'outline' : 'map';
   }
 
-  function frameGraphForIntro() {
-    if (!state.draft || !state.layout) return;
-    const padding = 32;
-    const graphWidth = state.layout.width;
-    const viewWidth = Math.max(1, DOM.canvas.clientWidth);
-    const scale = Math.max(CANVAS_INTRO_MIN_ZOOM, Math.min(1, (viewWidth - (padding * 2)) / graphWidth));
+  // Framing used right after an assistant build. The whole event should land in
+  // frame so the reveal reads as "here is the shape", with a legibility floor
+  // so a large program is allowed to run off the bottom rather than shrink to
+  // unreadable; that is the case where the zoom controls appear.
+  function frameGraphForIntro(retriesLeft) {
+    const bounds = getGraphContentBounds();
+    if (!state.draft || !bounds || !DOM.canvas) return;
+    const padding = 24;
+    const viewWidth = DOM.canvas.clientWidth;
+    const viewHeight = DOM.canvas.clientHeight;
+
+    // The workspace is usually revealed in the same tick as the build, so the
+    // canvas can still measure zero here. Framing against that collapses to
+    // the minimum zoom and leaves the map clipped, so wait for a real box.
+    if (viewWidth < 2 || viewHeight < 2) {
+      const remaining = typeof retriesLeft === 'number' ? retriesLeft : 10;
+      if (remaining > 0) {
+        window.requestAnimationFrame(function () { frameGraphForIntro(remaining - 1); });
+      }
+      return;
+    }
+
+    const scaleX = (viewWidth - (padding * 2)) / bounds.width;
+    const scaleY = (viewHeight - (padding * 2)) / bounds.height;
+    const scale = Math.max(CANVAS_INTRO_MIN_ZOOM, Math.min(1, scaleX, scaleY));
     state.canvasView.scale = scale;
-    state.canvasView.panX = Math.max(0, (viewWidth - (graphWidth * scale)) / 2);
-    state.canvasView.panY = 0;
+    state.canvasView.panX = ((viewWidth - (bounds.width * scale)) / 2) - (bounds.minX * scale);
+    state.canvasView.panY = Math.max(padding, (viewHeight - (bounds.height * scale)) / 2)
+      - (bounds.minY * scale);
     applyCanvasTransform();
   }
 
@@ -1622,6 +1663,110 @@
       const name = getSessionTitle(cmd.sessionId);
       duplicateSession(cmd.sessionId);
       return { ok: true, message: `Duplicated "${name}".` };
+    }
+
+    // Batch edit from the chat refine card. Rows carry the session id they were
+    // rendered from; a row without one is an addition, and an id that no longer
+    // appears is a removal. One command so the whole card is a single undo.
+    if (cmd.type === 'apply-structure') {
+      const edits = cmd.value || {};
+      const changes = [];
+
+      const basicsTitle = cleanText(edits.basics && edits.basics.title);
+      if (basicsTitle) {
+        const basicsId = findSingletonNodeId(state.draft, NODE_TYPES.BASICS);
+        if (basicsId) {
+          const basicsPayload = state.draft.payloadByNodeId[basicsId]
+            || (state.draft.payloadByNodeId[basicsId] = {});
+          if (cleanText(basicsPayload.title) !== basicsTitle) {
+            changes.push(`Event name -> "${basicsTitle}"`);
+            basicsPayload.title = basicsTitle;
+          }
+        }
+      }
+
+      const registration = edits.registration;
+      if (registration && registration.path) {
+        const regId = findSingletonNodeId(state.draft, NODE_TYPES.REGISTRATION);
+        if (regId) {
+          const regPayload = state.draft.payloadByNodeId[regId]
+            || (state.draft.payloadByNodeId[regId] = {});
+          const nextModes = [registration.path];
+          if (registration.attendance) nextModes.push('attendance-tracked');
+          if ((regPayload.modes || []).join('|') !== nextModes.join('|')) {
+            changes.push('Registration -> ' + (registration.path === 'approval-required' ? 'approval required' : 'open')
+              + (registration.attendance ? ', attendance tracked' : ''));
+            regPayload.modes = nextModes;
+          }
+        }
+      }
+
+      // The session rows are a full replacement set, so anything absent from
+      // them is a deletion. That only holds when rows were actually sent: an
+      // edit that omits the list entirely means "leave the sessions alone".
+      const hasSessionRows = Array.isArray(edits.sessions);
+      const rows = hasSessionRows ? edits.sessions : [];
+      if (hasSessionRows) {
+        const keptIds = rows.map(function (row) { return row.id; }).filter(Boolean);
+        sessions.slice().forEach(function (sessionId) {
+          if (keptIds.indexOf(sessionId) > -1) return;
+          changes.push(`Removed "${getSessionTitle(sessionId)}"`);
+          removeNode(sessionId);
+        });
+      }
+
+      rows.forEach(function (row) {
+        let sessionId = row.id && (state.draft.sessions || []).indexOf(row.id) > -1 ? row.id : null;
+        if (!sessionId) {
+          sessionId = addNodeByType(state.draft, NODE_TYPES.SESSION, false);
+          if (!sessionId) return;
+          changes.push(`Added "${cleanText(row.name) || 'New session'}"`);
+        }
+
+        const name = cleanText(row.name);
+        if (name && name !== getSessionTitle(sessionId)) {
+          if (row.id) changes.push(`${sessionLabel(sessionId)} -> "${name}"`);
+          setSessionTitle(state.draft, sessionId, name);
+        }
+
+        const capacity = cleanText(row.capacity);
+        if (capacity && /^\d+$/.test(capacity)) {
+          const beforeCapacity = cleanText(getSessionChildPayload(state.draft, sessionId, NODE_TYPES.SESSION_CAPACITY).capacity);
+          if (beforeCapacity !== capacity) {
+            if (row.id) changes.push(`${sessionLabel(sessionId)} seats ${beforeCapacity || '—'} -> ${capacity}`);
+            setSessionChildData(sessionId, NODE_TYPES.SESSION_CAPACITY, { capacity: capacity });
+          }
+        }
+
+        const schedulePatch = {};
+        const date = cleanText(row.date);
+        const timezone = cleanText(row.timezone);
+        const beforeSchedule = getSessionSchedulePayload(sessionId);
+        if (date && date !== beforeSchedule.date) {
+          schedulePatch.date = date;
+          if (row.id) changes.push(`${sessionLabel(sessionId)} date ${beforeSchedule.date || '—'} -> ${date}`);
+        }
+        if (timezone && timezone !== beforeSchedule.timezone) {
+          schedulePatch.timezone = timezone;
+        }
+        if (Object.keys(schedulePatch).length) {
+          setSessionChildData(sessionId, NODE_TYPES.SESSION_SCHEDULE, schedulePatch);
+        }
+      });
+
+      if (!changes.length) {
+        return { ok: false, message: 'Nothing changed \u2014 that already matches the event on the map.' };
+      }
+
+      computeConflicts(state.draft);
+      markDirty();
+      updateColdStartVisibility();
+      renderAll();
+      return {
+        ok: true,
+        message: `Applied ${changes.length} change${changes.length === 1 ? '' : 's'} to the event.`,
+        changes: changes
+      };
     }
 
     // The attribute + bulk commands below all target one or more sessions via
@@ -2548,14 +2693,44 @@
 
   function updateViewToggle() {
     const isMap = state.viewMode === 'map';
-    if (DOM.viewToggle) {
-      DOM.viewToggle.textContent = isMap ? 'Outline view' : 'Map view';
-      DOM.viewToggle.setAttribute('aria-pressed', isMap ? 'true' : 'false');
-    }
-    if (DOM.zoomCluster) DOM.zoomCluster.classList.toggle('is-hidden', !isMap);
+    [
+      { button: DOM.viewMapButton, active: isMap },
+      { button: DOM.viewOutlineButton, active: !isMap }
+    ].forEach(function (entry) {
+      if (!entry.button) return;
+      entry.button.classList.toggle('is-active', entry.active);
+      entry.button.setAttribute('aria-pressed', entry.active ? 'true' : 'false');
+    });
+    updateZoomClusterVisibility();
     if (DOM.canvasHeading) DOM.canvasHeading.textContent = isMap ? 'Map' : 'Outline';
     if (DOM.canvas) DOM.canvas.classList.toggle('is-map-view', isMap);
     if (DOM.adminPanel) DOM.adminPanel.classList.toggle('is-map-view', isMap);
+  }
+
+  // The hero event is 1-3 sessions and always fits, so zoom and fit are noise
+  // until a program actually outgrows the frame. The test is whether a node is
+  // really clipped, not whether the layout box is larger than the frame: the
+  // box carries slack the map never paints, so measuring it would show the
+  // controls on events that are plainly all visible.
+  function updateZoomClusterVisibility() {
+    if (!DOM.zoomCluster) return;
+    let overflows = false;
+    const layer = state.viewMode === 'map' && DOM.canvas
+      ? DOM.canvas.querySelector('.event-canvas-node-layer')
+      : null;
+
+    if (layer && layer.children.length) {
+      const frame = DOM.canvas.getBoundingClientRect();
+      Array.prototype.forEach.call(layer.children, function (node) {
+        if (overflows) return;
+        const rect = node.getBoundingClientRect();
+        if (!rect.width && !rect.height) return;
+        overflows = rect.left < frame.left - 1 || rect.top < frame.top - 1
+          || rect.right > frame.right + 1 || rect.bottom > frame.bottom + 1;
+      });
+    }
+
+    DOM.zoomCluster.classList.toggle('is-hidden', !overflows);
   }
 
   // One paint routine for the middle column, so every caller stays view-agnostic.
@@ -2621,20 +2796,21 @@
       DOM.statusChip.textContent = STATUS.NOT_STARTED;
     }
 
-    const template = state.draft.meta.templateId ? getTemplateById(state.draft.meta.templateId) : null;
-    const templateLabel = template ? `${template.label} template` : 'Blank canvas';
+    // Save state reads as a quiet status beside the header actions, so it is
+    // the status alone; which template seeded the draft is visible in the
+    // editor itself and was only ever noise here.
     const syncedAt = savedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    let statusLabel = `Draft saved at ${syncedAt}`;
+    let statusLabel = `Saved ${syncedAt}`;
     if (state.draft.meta.publishStatus === 'published' && state.draft.meta.publishedAt) {
       const publishedAt = new Date(state.draft.meta.publishedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      statusLabel = `Published at ${publishedAt}`;
+      statusLabel = `Published ${publishedAt}`;
     } else if (state.draft.meta.validationAttempted) {
       const checklist = state.draft.publishChecklist || { blockers: [], warnings: [] };
       statusLabel = `${checklist.blockers.length} blocker(s) · ${checklist.warnings.length} warning(s)`;
     } else if (state.draft.meta.isDirty) {
       statusLabel = 'Unsaved changes';
     }
-    DOM.meta.textContent = `${templateLabel} · ${statusLabel}.`;
+    if (DOM.meta) DOM.meta.textContent = statusLabel;
     updateHeaderButtons();
     updatePublishSuccessChip();
   }
@@ -2811,13 +2987,21 @@
     return true;
   }
 
-  function buildFromProposal() {
-    syncProposalFromForm();
-    const result = buildDraftFromParams(state.proposalParams);
+  // Reveal-first: a description maps out immediately instead of stopping at a
+  // review form, so the drawn structure is what the admin refines against. The
+  // onEventBuilt hand-off is what lets chat post the refine card.
+  function buildAndRevealFromParams(params) {
+    const result = buildDraftFromParams(normalizeProposalParams(params));
     state.proposalParams = null;
     setProposalMode(false);
-    loadGeneratedDraft(result.draft, { skipConfirm: true });
-    if (typeof state.onEventBuilt === 'function') state.onEventBuilt();
+    const loaded = loadGeneratedDraft(result.draft, { skipConfirm: true });
+    if (loaded && typeof state.onEventBuilt === 'function') state.onEventBuilt();
+    return loaded;
+  }
+
+  function buildFromProposal() {
+    syncProposalFromForm();
+    buildAndRevealFromParams(state.proposalParams);
   }
 
   function backFromProposal() {
@@ -3941,13 +4125,19 @@
   }
 
   function resetCurrentDraft() {
-    const shouldReset = window.confirm('Reset current draft to a blank event? This cannot be undone.');
+    const shouldReset = window.confirm('Discard this event and go back to Home? This cannot be undone.');
     if (!shouldReset) return;
     loadDraft(createDraft());
-    saveDraft(false);
+    // Leave nothing behind. Persisting a blank draft is what puts a stale event
+    // back in front of whoever opens the prototype next.
+    window.localStorage.removeItem(STORAGE_KEY);
     showColdStart();
     resetCanvasView();
-    showToast('Draft reset.', 4000);
+    // Discarding is a full restart, not a state inside the editor: the chat and
+    // the workspace both go back to where the flow starts.
+    if (typeof window.resetChatConversation === 'function') window.resetChatConversation();
+    if (typeof window.closeEventWorkspace === 'function') window.closeEventWorkspace();
+    showToast('Event discarded.', 4000);
   }
 
   function initializeEditor() {
@@ -3987,6 +4177,40 @@
   DOM.sampleButton && DOM.sampleButton.addEventListener('click', function () {
     loadSampleDraft();
   });
+
+  // Discarding lives behind an overflow so a destructive action is never one
+  // stray click away from Save. Wired here rather than in chat.js because the
+  // standalone editor page loads this file but not that one.
+  // Dragging the chat panel resizes the canvas without a window resize event,
+  // so whether the graph still fits is re-read from the element itself.
+  if (typeof window.ResizeObserver === 'function' && DOM.canvas) {
+    new window.ResizeObserver(function () {
+      updateZoomClusterVisibility();
+    }).observe(DOM.canvas);
+  }
+
+  (function wireWorkspaceOverflow() {
+    const toggle = document.getElementById('workspace-overflow-toggle');
+    const menu = document.getElementById('workspace-overflow-menu');
+    if (!toggle || !menu) return;
+
+    function setOpen(isOpen) {
+      toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+      menu.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+    }
+
+    toggle.addEventListener('click', function (event) {
+      event.stopPropagation();
+      setOpen(toggle.getAttribute('aria-expanded') !== 'true');
+    });
+    menu.addEventListener('click', function () { setOpen(false); });
+    document.addEventListener('click', function (event) {
+      if (!menu.contains(event.target) && !toggle.contains(event.target)) setOpen(false);
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') setOpen(false);
+    });
+  }());
 
   DOM.closeButton && DOM.closeButton.addEventListener('click', resetCurrentDraft);
   DOM.saveButton && DOM.saveButton.addEventListener('click', saveDraftLocal);
@@ -4065,8 +4289,9 @@
     window.setTimeout(function () {
       if (DOM.aiGenerating) DOM.aiGenerating.classList.add('is-hidden');
       if (DOM.aiSubmit) DOM.aiSubmit.disabled = false;
-      // The human reviews the parsed plan before it maps out; Build commits it.
-      openProposalReview(parseEventPrompt(text));
+      // Same beat as the chat path: draft, then reveal on the map. Review moved
+      // after the reveal so both describe-your-event surfaces tell one story.
+      buildAndRevealFromParams(parseEventPrompt(text));
       if (DOM.aiInput) DOM.aiInput.value = '';
     }, 620);
   }
@@ -4376,15 +4601,19 @@
   DOM.zoomOutButton && DOM.zoomOutButton.addEventListener('click', function () {
     setCanvasZoom(state.canvasView.scale - 0.1);
   });
-  DOM.zoomResetButton && DOM.zoomResetButton.addEventListener('click', resetCanvasView);
   DOM.fitGraphButton && DOM.fitGraphButton.addEventListener('click', fitCanvasToGraph);
 
-  DOM.viewToggle && DOM.viewToggle.addEventListener('click', function () {
-    state.viewMode = state.viewMode === 'map' ? 'outline' : 'map';
-    if (state.viewMode === 'map') resetCanvasView();
+  function setViewMode(nextMode) {
+    if (state.viewMode === nextMode) return;
+    state.viewMode = nextMode;
+    if (nextMode === 'map') resetCanvasView();
     renderView();
-    if (state.viewMode === 'map') fitCanvasToGraph();
-  });
+    if (nextMode === 'map') fitCanvasToGraph();
+    updateViewToggle();
+  }
+
+  DOM.viewMapButton && DOM.viewMapButton.addEventListener('click', function () { setViewMode('map'); });
+  DOM.viewOutlineButton && DOM.viewOutlineButton.addEventListener('click', function () { setViewMode('outline'); });
 
   // ---------------------------------------------------------------------------
   // AI-style event generation (deterministic, prototype-only).
@@ -4875,6 +5104,7 @@
     getEventContext: getEventContext,
     applyEnterprise: applyEnterprise,
     getEnterpriseSyncSummary: getEnterpriseSyncSummary,
+    clearToast: clearToast,
     getViewMode: function () { return state.viewMode; },
     setNodeFocusHandler: function (handler) { state.onNodeFocus = typeof handler === 'function' ? handler : null; },
     setEventBuiltHandler: function (handler) { state.onEventBuilt = typeof handler === 'function' ? handler : null; },
