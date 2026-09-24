@@ -227,13 +227,13 @@
           <div class="workspace-header-copy">
             <h1>New Event</h1>
           </div>
-          <!-- Review and Publish are the pair that moves the event forward.
-               Save sits quiet beside the state it writes, and discarding is
-               destructive so it lives behind the overflow. -->
+          <!-- Publish is the one action that moves the event forward; it runs
+               the checklist itself and opens the review only when there is
+               something to answer. Save sits quiet beside the state it writes,
+               and discarding is destructive so it lives behind the overflow. -->
           <div class="workspace-header-actions">
             <span class="workspace-save-status" id="event-admin-meta" aria-live="polite"></span>
             <button type="button" class="workspace-quiet-action" id="workspace-save-button">Save</button>
-            <button type="button" class="home-task-action" id="workspace-review-button">Review</button>
             <button type="button" class="home-task-action home-task-action-primary" id="workspace-publish-button">Publish</button>
             <div class="workspace-overflow">
               <button type="button" class="event-toolbar-icon" id="workspace-overflow-toggle" aria-label="More event actions" aria-haspopup="menu" aria-expanded="false" aria-controls="workspace-overflow-menu">

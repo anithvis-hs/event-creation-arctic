@@ -2817,6 +2817,17 @@ a.switcher-nav-link {
   background: rgba(51, 78, 92, 0.06);
 }
 
+/* Move up and Move down are dead at the ends of a list, so the shared menu
+   item needs a disabled look it never had while it lived only in the toolbar. */
+.workspace-overflow-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.workspace-overflow-item:disabled:hover {
+  background: transparent;
+}
+
 .workspace-overflow-item.is-destructive {
   color: #b3261e;
 }
@@ -2839,13 +2850,6 @@ a.switcher-nav-link {
   font-size: var(--text-md);
 }
 
-.event-session-child-summary {
-  margin: 0;
-  padding-left: var(--space-lg);
-  display: grid;
-  gap: var(--space-4xs);
-}
-
 .event-link-button {
   border: 0;
   background: transparent;
@@ -2853,10 +2857,6 @@ a.switcher-nav-link {
   font: inherit;
   padding: 0;
   cursor: pointer;
-}
-
-.event-session-item {
-  flex-wrap: wrap;
 }
 
 .workspace-event-preview ul {
@@ -4304,35 +4304,118 @@ a.switcher-nav-link {
   margin-top: var(--space-3xs);
 }
 
+/* The one step back out of a child card, up to the session whose glance list
+   led here. Same reset as the glance rows so the two read as one family. */
+.event-back-link {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3xs);
+  width: 100%;
+  margin-bottom: var(--space-2xs);
+  padding: var(--space-3xs) var(--space-3xs);
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--polar-motion-duration-fast) var(--polar-motion-easing-standard),
+    color var(--polar-motion-duration-fast) var(--polar-motion-easing-standard);
+}
+
+.event-back-link:hover {
+  background: rgba(42, 186, 248, 0.08);
+  color: var(--text-primary);
+}
+
+.event-back-link:focus-visible {
+  outline: 2px solid rgba(42, 186, 248, 0.6);
+  outline-offset: 1px;
+}
+
+.event-back-link-arrow {
+  flex-shrink: 0;
+}
+
+/* Session names run long, and the rail is narrow enough that a single
+   unbreakable word would push the button past its edge. */
+.event-back-link-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .event-glance-grid {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3xs);
   margin-top: var(--space-3xs);
+  border-top: 1px solid rgba(51, 78, 92, 0.1);
 }
 
+/* Every card of the session, one row each. Seven bordered cards would crowd a
+   rail this narrow, so the rows are separated by hairlines and lean on hover
+   for their affordance rather than each carrying its own box. The value sits
+   under the label instead of beside it because a venue or a timezone has no
+   room to share a 240px line. */
 .event-glance-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: var(--space-sm);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "label status"
+    "value value";
+  align-items: center;
+  gap: var(--space-4xs) var(--space-2xs);
+  width: 100%;
+  padding: var(--space-2xs) var(--space-3xs);
+  border: 0;
+  border-bottom: 1px solid rgba(51, 78, 92, 0.1);
+  border-radius: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--polar-motion-duration-fast) var(--polar-motion-easing-standard);
 }
 
-.event-glance-label {
-  font-size: var(--text-xs);
-  color: rgba(51, 78, 92, 0.7);
+.event-glance-row:hover {
+  background: rgba(42, 186, 248, 0.08);
 }
 
-.event-glance-value {
+.event-glance-row:focus-visible {
+  outline: 2px solid rgba(42, 186, 248, 0.6);
+  outline-offset: -2px;
+}
+
+.event-glance-label,
+.event-summary-label {
+  grid-area: label;
   font-size: var(--text-xs);
   font-weight: 600;
-  color: rgba(28, 44, 54, 0.95);
-  text-align: right;
+  color: var(--text-primary);
 }
 
-.event-glance-value.is-empty {
-  font-weight: 500;
-  color: rgba(51, 78, 92, 0.5);
+.event-glance-status {
+  grid-area: status;
+  justify-self: end;
+}
+
+.event-glance-value,
+.event-summary-value {
+  grid-area: value;
+  font-size: var(--text-xs);
+  line-height: var(--line-height-normal);
+  color: rgba(51, 78, 92, 0.8);
+}
+
+/* A venue link has no break opportunity, so without this it runs straight out
+   of the rail. One line per row also keeps the glance list scannable. */
+.event-glance-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .event-integration-badge {
@@ -4763,6 +4846,9 @@ a.switcher-nav-link {
   min-height: 0;
   overflow-y: auto;
   display: grid;
+  /* An auto column sizes to the widest field's min-content, so one oversized
+     field would widen every row in the form. Pin the column to the rail. */
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
   gap: var(--space-md);
 }
@@ -4784,7 +4870,6 @@ a.switcher-nav-link {
 .event-field input:not([type="checkbox"]):not([type="radio"]),
 .event-field textarea,
 .event-field select,
-.event-session-title-input,
 .event-instructor-input {
   width: 100%;
   border: 1px solid rgba(51, 78, 92, 0.2);
@@ -4854,6 +4939,18 @@ a.switcher-nav-link {
   gap: var(--space-2xs);
 }
 
+/* Two native time inputs cannot both fit the rail: each carries a ~133px
+   intrinsic floor against a 228px content box. Side by side they would widen
+   the whole form, so the pair drops to one field per line instead. */
+.event-field-pair {
+  flex-wrap: wrap;
+}
+
+.event-field-pair > .event-field {
+  flex: 1 1 8rem;
+  min-width: 0;
+}
+
 .event-mini-button {
   border: 1px solid rgba(51, 78, 92, 0.2);
   border-radius: var(--radius-xs);
@@ -4877,8 +4974,7 @@ a.switcher-nav-link {
   gap: var(--space-2xs);
 }
 
-.event-instructor-item,
-.event-session-item {
+.event-instructor-item {
   display: flex;
   align-items: center;
   gap: var(--space-2xs);
@@ -4886,6 +4982,133 @@ a.switcher-nav-link {
   border-radius: var(--radius-xs);
   background: rgba(255, 255, 255, 0.55);
   padding: var(--space-2xs);
+}
+
+/* Relative so each card can host its own menu popover. The row button takes all
+   the slack; only the menu toggle is held out of it. */
+.event-session-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-4xs);
+  border: 1px solid rgba(51, 78, 92, 0.12);
+  border-radius: var(--radius-xs);
+  background: rgba(255, 255, 255, 0.55);
+  padding: var(--space-3xs);
+  transition: border-color var(--polar-motion-duration-fast) var(--polar-motion-easing-standard);
+}
+
+.event-session-item:hover {
+  border-color: rgba(42, 186, 248, 0.45);
+}
+
+/* Same two-line anatomy as the glance rows: name and status share the first
+   line, the date and venue run full width underneath. */
+.event-session-open {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "name status"
+    "meta meta";
+  align-items: center;
+  gap: var(--space-4xs) var(--space-2xs);
+  min-width: 0;
+  padding: var(--space-4xs) var(--space-3xs);
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--polar-motion-duration-fast) var(--polar-motion-easing-standard);
+}
+
+.event-session-open:hover {
+  background: rgba(42, 186, 248, 0.08);
+}
+
+.event-session-open:focus-visible,
+.event-session-menu-toggle:focus-visible {
+  outline: 2px solid rgba(42, 186, 248, 0.6);
+  outline-offset: 1px;
+}
+
+.event-session-name {
+  grid-area: name;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.event-session-status {
+  grid-area: status;
+  justify-self: end;
+}
+
+.event-session-meta {
+  grid-area: meta;
+  font-size: var(--text-xs);
+  line-height: var(--line-height-normal);
+  color: rgba(51, 78, 92, 0.8);
+  overflow-wrap: anywhere;
+}
+
+.event-session-menu-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-24);
+  height: var(--size-24);
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--text-sm);
+  line-height: var(--line-height-tight);
+  cursor: pointer;
+  transition: background var(--polar-motion-duration-fast) var(--polar-motion-easing-standard);
+}
+
+.event-session-menu-toggle:hover {
+  background: rgba(51, 78, 92, 0.08);
+  color: var(--text-primary);
+}
+
+/* The rail is narrow, so a 168px menu anchored to the toggle would hang off the
+   right edge. Anchor it to the card instead and let it use the full width. */
+.event-session-menu {
+  min-width: 0;
+  left: 0;
+}
+
+/* Set when the card sits too low in the scrolling form for the menu to fit
+   underneath it. */
+.event-session-item.is-menu-above .event-session-menu {
+  top: auto;
+  bottom: calc(100% + var(--space-4xs));
+}
+
+.event-sessions-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2xs);
+}
+
+.event-summary-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3xs);
+  margin-top: var(--space-3xs);
+}
+
+.event-summary-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4xs);
 }
 
 /* Provenance marker: says whether a value came from the event or was set here. */
@@ -4939,6 +5162,10 @@ a.switcher-nav-link {
 
 .event-instructor-value {
   flex: 1;
+  /* An email address has no break opportunity, so at the rail's narrowest it
+     would otherwise push the Remove button past the panel edge. */
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: var(--text-secondary);
   font-size: var(--text-sm);
 }

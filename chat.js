@@ -1031,10 +1031,20 @@
     });
 
     if (blockerIndex === -1) {
+      // No collision is not the same as ready: the publish checklist also
+      // covers unfilled required fields, so the turn reports what it knows
+      // rather than promising a clean run.
+      const readiness = typeof admin.getPublishReadiness === 'function' ? admin.getPublishReadiness() : null;
+      const outstanding = readiness ? readiness.blockers : 0;
       appendAiMessage({
         intro: 'The canvas is built and I found no scheduling collisions across the three branches.',
-        heading: 'Ready for review',
-        details: ['Open any node on the canvas to fill in the remaining details.']
+        heading: outstanding ? 'Almost ready' : 'Ready to publish',
+        details: [outstanding
+          ? (outstanding === 1
+            ? '1 required field still needs filling in. Publish will take you to it.'
+            : `${outstanding} required fields still need filling in. Publish will walk you through them.`)
+          : 'Everything the checklist looks for is filled in.'],
+        actions: [{ label: 'Publish', publish: true }]
       });
       return;
     }
@@ -1065,14 +1075,25 @@
       `${result.sessionTitle} moved from ${result.previousWindow} to ${result.nextWindow}${timezoneNote}. Its schedule node is selected on the canvas.`
     ];
 
+    const admin = window.ArcticEventAdmin;
+    const readiness = admin && typeof admin.getPublishReadiness === 'function' ? admin.getPublishReadiness() : null;
+    const outstanding = readiness ? readiness.blockers : 0;
+
     details.push(result.remainingConflicts
       ? `${result.remainingConflicts} other issue${result.remainingConflicts === 1 ? '' : 's'} still needs attention before publish.`
-      : 'No conflicts remain. The program is ready for review and publish.');
+      : (outstanding
+        ? (outstanding === 1
+          ? 'No conflicts remain, but 1 required field still needs filling in.'
+          : `No conflicts remain, but ${outstanding} required fields still need filling in.`)
+        : 'No conflicts remain. The program is ready to publish.'));
 
     appendAiMessage({
       intro: 'Done. I shifted the later session so the two no longer overlap, then re-checked the whole program.',
       heading: 'Conflict resolved',
-      details: details
+      details: details,
+      // Only offer the last step once the re-check came back clean; while
+      // issues remain the copy above is already saying there is more to do.
+      actions: result.remainingConflicts ? [] : [{ label: 'Publish', publish: true }]
     });
   }
 
@@ -1102,7 +1123,9 @@
       ],
       actions: [
         { label: 'Finish setup', enterpriseSetup: true },
-        { label: 'Not now', dismiss: true }
+        // Declining the extras should still land on the cross-session check,
+        // which is where the event becomes publishable either way.
+        { label: 'Not now', dismiss: true, then: appendConflictFollowUp }
       ]
     });
   }
@@ -1402,6 +1425,19 @@
             }
             button.disabled = true;
             if (typeof action.enterprise.next === 'function') action.enterprise.next();
+          }));
+          return;
+        }
+
+        // Publishes when the checklist is clean and opens the review when it
+        // is not, so the agent can offer this the moment it believes the event
+        // is ready without having to be right. Unlike the cards that resolve a
+        // question once, this button stays live: closing the review to go fix
+        // something has to leave a way back.
+        if (action.publish) {
+          actionsRow.appendChild(createActionButton(action.label, function () {
+            const admin = window.ArcticEventAdmin;
+            if (admin && typeof admin.publish === 'function') admin.publish();
           }));
           return;
         }
